@@ -22,6 +22,9 @@ setup(
     entry_points={
         'console_scripts': [
             'demo = franka_llm_planner.demo:main',
+            'vlm_image_analyzer = franka_llm_planner.vlm_image_analyzer:main',
+            'vlm_tester = franka_llm_planner.vlm_tester:main',
+            'vlm_test_image = franka_llm_planner.vlm_test_image:main',
         ],
     },
 )
