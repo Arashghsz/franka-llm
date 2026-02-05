@@ -21,11 +21,7 @@ setup(
     license='MIT',
     entry_points={
         'console_scripts': [
-            'task_publisher = franka_llm_planner.task_publisher:main',
-            'task_subscriber = franka_llm_planner.task_subscriber:main',
-            'llm_node = franka_llm_planner.llm_node:main',
-            'simple_arm_test = franka_llm_planner.simple_arm:main',
-            'simple_control = franka_llm_planner.simple_control:go_home',
+            'demo = franka_llm_planner.demo:main',
         ],
     },
 )
