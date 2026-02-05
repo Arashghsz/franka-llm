@@ -1,4 +1,4 @@
-# 🎯 Thesis Goals: Distributed Edge AI for Robotic Manipulation
+# Goals: Distributed Edge AI for Robotic Manipulation
 
 **Status**: In Progress (Feb 2026)  
 **Target Conference**: Ro-Man 2026  
@@ -55,50 +55,75 @@
 
 ## Implementation Status
 
+### Phase 0: Perception & 3D Mapping (Jetson) - **COMPLETE** 
+- [x] RealSense D415 camera plugged into Jetson (fixed, overhead viewpoint)
+- [x] Isaac ROS RealSense driver running (publishes depth + RGB)
+- [x] Isaac ROS NVBlox 3D reconstruction pipeline active
+- [x] 3D scene map published on `/nvblox_node/static_esdf_pointcloud`
+- [x] Network verified: RTX6000 receives all topics over ROS_DOMAIN_ID=42
+
+**Status**: Camera feed and 3D reconstruction flowing from Jetson → RTX6000 over ROS 2 network.
+
+**Location**: Jetson workspace (`~/workspaces/isaac_ros-dev/`), launched via:
+```bash
+ros2 launch nvblox_examples_bringup realsense_example.launch.py run_realsense:=True mode:=static
+```
+
 ### Phase 1: Task Planner (LLM) - **IN PROGRESS**
 - [x] Basic LLM node with Ollama integration
-- [x] ROS 2 pub/sub setup
+- [x] ROS 2 pub/sub setup (subscribes `/user_command`, publishes `/llm_response`)
 - [x] System prompt for task planning
 - [ ] Enhanced: Context tracking (conversation history)
 - [ ] Enhanced: Error handling for safety rejections
 - [ ] Enhanced: State machine (IDLE → PLANNING → AWAITING_SAFETY → READY)
 - [ ] Enhanced: Timeout handling for VLM verdicts
+- [ ] Conversation logging node (logs `/user_command` and `/llm_response` to JSONL)
+- [ ] CLI chat node (terminal interface for interacting with LLM)
 
 **Location**: `/home/arash/franka-llm/src/franka_llm_planner/franka_llm_planner/llm_node.py`
 
-### Phase 2: Safety Agent (VLM) - **NOT STARTED**
-- [ ] VLM node creation (camera feed processor)
-- [ ] Model selection (LLaVA / VILA / GPT-4V)
-- [ ] Safety check implementation
+**Next**: Iteration 1 – Add conversation logging + CLI chat interface.
+
+### Phase 2: Safety Agent (VLM) - **SCAFFOLDED** (stub ready)
+- [x] VLM package structure created
+- [x] Stub node that subscribes `/planned_action` and `/camera/color/image_raw`
+- [ ] Define final `/vlm_request` and `/vlm_safety_verdict` topics
+- [ ] Integrate real VLM model (LLaVA / VILA from Isaac ROS index)
+- [ ] Safety check implementation (obstacle, hazard, grasp feasibility)
 - [ ] ROS 2 integration for network communication
 
-**Location**: `/home/arash/franka-llm/src/franka_vlm_safety/` (to be created)
+**Location**: `/home/arash/franka-llm/src/franka_vlm_safety/franka_vlm_safety/vlm_node.py`
+
+**Status**: Waiting for Iteration 2 of multi-agent architecture.
 
 ### Phase 3: Motion Execution - **PARTIAL**
-- [x] Basic joint control (demo.py)
-- [x] MoveIt integration
+- [x] Basic joint control (demo.py on RTX6000)
+- [x] MoveIt 2 integration
 - [x] Consolidated codebase structure:
   - `moveit/robot.py` - FrankaHelperReal (core robot interface)
   - `moveit/manipulation_tasks.py` - FrankaManipulation (high-level tasks)
   - `moveit/moveit_helpers.py` - MoveIt2 utilities
+- [ ] **NEW: Perception-aware planning** – Subscribe to `/nvblox_node/static_esdf_pointcloud` and add dynamic collision objects to MoveIt scene
 - [ ] Pick & place primitives
 - [ ] Integration with safety verdicts
-- [ ] Feedback loop to coordinator
+- [ ] Feedback loop (`/execution_status`) to coordinator
 
-**Location**: `/home/arash/franka-llm/src/franka_llm_planner/franka_llm_planner/moveit/`
-  - All motion control in single folder for easy maintenance
-  - Imported via main package `__init__.py`
+**Location**: `/home/arash/franka-llm/src/franka_llm_planner/franka_llm_planner/moveit/` (Jetson) and RTX6000 motion executor
+
+**Next**: Build perception→MoveIt bridge on RTX6000 to make motion planning "camera-aware".
 
 ### Phase 4: Coordinator - **NOT STARTED**
 - [ ] LLM → VLM → Motion orchestration
+- [ ] Subscribes: `/planned_action`, `/vlm_safety_verdict`
+- [ ] Publishes: `/user_command` (to Jetson), `/execution_status` (from motion)
 - [ ] State management
-- [ ] Error recovery
+- [ ] Error recovery and timeout handling
 
 ---
 
 ## Robot Action Policies (Primitives)
 
-### Defined Actions
+### Defined Actions (might need some change)
 ```python
 ROBOT_ACTIONS = {
     "pick": {
@@ -149,6 +174,24 @@ Implement and evaluate a distributed system where:
 3. **Motion Execution** on separate PC handles low-level control
 4. All communicate via ROS 2 pub/sub over local network
 
+### Multi-Agent & Conversation Logging Goal
+
+Build a **multi-agent LLM + VLM system** where:
+- LLM and VLM run as separate ROS 2 nodes (agents) on Jetson
+- Coordinator and Motion Execution run on the RTX6000 controller
+- All inter-agent messages (user → LLM → VLM → Coordinator → Motion) are **logged as a chat-like transcript**
+
+Planned iterations:
+1. **Iteration 1** – Single-agent LLM with logging
+  - Terminal/chat interface for `/user_command` ↔ `/llm_response`
+  - Conversation logger node writing JSONL logs of all messages
+2. **Iteration 2** – Add VLM agent
+  - Define `/vlm_request` and `/vlm_safety_verdict` topics
+  - Log LLM↔VLM interactions alongside user messages
+3. **Iteration 3** – Connect to Motion Execution
+  - Coordinator on RTX6000 subscribes to planned actions and safety verdicts
+  - Motion status (`/execution_status`) included in the same conversation log
+
 ### Secondary Goals
 
 #### 1. Task Evaluation (Ro-Man 2026 Paper)
@@ -182,6 +225,12 @@ Evaluate and compare:
 - [ ] Grasp feasibility verification
 - [ ] Error recovery mechanisms
 - [ ] Human-in-the-loop intervention
+
+#### 5. Multi-Agent Behavior Analysis
+- [ ] Design logging format for multi-agent conversations (JSONL)
+- [ ] Implement ROS 2 logger node for user, LLM, VLM, and coordinator messages
+- [ ] Build simple chatbot-style interface to inspect conversations
+- [ ] Analyze failure cases and emergent behaviors from logs
 
 ---
 
@@ -245,36 +294,83 @@ Evaluate and compare:
 
 ## Next Steps (Immediate)
 
-1. **Enhance LLM Node** (this week)
-   - Add state machine
-   - Add conversation history
-   - Add timeout handling
+### **Iteration 1 (Jetson): Multi-Agent Logging & Chat**
+Goal: See LLM and VLM agents "talking" with conversation logs.
 
-2. **Create VLM Safety Node** (next week)
-   - Subscribe to camera feed
-   - Subscribe to planned action
-   - Publish safety verdict
+- [ ] Implement `conversation_logger` node – subscribes to `/user_command`, `/llm_response`, later `/vlm_request`, `/vlm_safety_verdict` and writes JSONL logs with timestamps
+- [ ] Implement `cli_chat_node` – terminal interface to send commands to LLM and receive responses
+- [ ] Test locally: type a command → LLM responds → see full conversation in logs
 
-3. **Implement Coordinator** (following week)
-   - Orchestrate LLM → VLM → Motion cycle
-   - Handle state transitions
-   - Log all interactions
-
-4. **End-to-end Testing**
-   - Gazebo simulation first
-   - Then real hardware
+**Timeline**: This week  
+**Output**: `logs/agent_chat.jsonl` file + terminal chat experience
 
 ---
+
+### **Phase 3.5 (RTX6000): Perception-Aware Planning**
+Goal: Make MoveIt aware of obstacles from the 3D camera map.
+
+- [ ] Build a `perception_to_moveit_bridge` node on RTX6000 that:
+  - Subscribes to `/nvblox_node/static_esdf_pointcloud` (3D map from Jetson)
+  - Converts point cloud to collision objects (e.g., bounding boxes)
+  - Adds/updates obstacles in MoveIt's planning scene via `PlanningSceneInterface`
+- [ ] Test: Place visible objects in front of robot → verify they appear as obstacles in RViz → simple motion plan should route around them
+- [ ] Expose via a ROS 2 service or auto-update when new 3D data arrives
+
+**Timeline**: Next week  
+**Outcome**: MoveIt plans collision-free paths considering real camera data
+
+---
+
+### **Iteration 2 (Jetson): Add VLM Agent**
+Goal: LLM → VLM safety check → verdict.
+
+- [ ] Define `/vlm_request` (input: planned_action JSON + image reference)
+- [ ] Define `/vlm_safety_verdict` (output: SAFE/UNSAFE + reason)
+- [ ] Replace stub VLM with real model (LLaVA or VILA from Isaac ROS index)
+- [ ] Extend logger to capture VLM messages
+- [ ] Test: LLM produces plan → VLM checks → verdict logged
+
+**Timeline**: Following week  
+**Output**: Full `user → LLM → VLM → verdict` conversation log
+
+---
+
+### **Iteration 3 (RTX6000): Connect Coordinator + Motion**
+Goal: Orchestrate the full LLM → VLM → Motion pipeline.
+
+- [ ] Build `coordinator_node` on RTX6000:
+  - Subscribes to `/planned_action` and `/vlm_safety_verdict`
+  - If SAFE, calls motion executor (your existing demo.py refactored as a service)
+  - Publishes `/execution_status` (RUNNING, SUCCESS, FAILURE)
+- [ ] Extend logger to include `/execution_status`
+- [ ] Test end-to-end: user command → full pipeline → robot moves → logs show everything
+
+**Timeline**: End of month  
+**Outcome**: Full multi-agent system with complete audit trail
+
+---
+
+### **Beyond**: Real-World Validation
+- [ ] Run 3–5 pick & place scenarios in simulation
+- [ ] Benchmark: latency, success rate, safety accuracy
+- [ ] Deploy on real Franka FR3 hardware
 
 ## Notes
 
-- **Network Setup**: ROS_DOMAIN_ID=42 for local testing
+- **Network Setup**: ROS_DOMAIN_ID=42 for local testing (verified working Feb 5, 2026)
 - **Ollama Setup**: Running on Jetson, accessible via http://localhost:11434
+- **Camera Setup**: Intel RealSense D415 plugged into Jetson (fixed, overhead mounting)
+- **3D Mapping**: Isaac ROS NVBlox outputs 3D scene reconstruction at ~10 Hz on `/nvblox_node/static_esdf_pointcloud`
 - **Development Environment**: VS Code with ROS 2 extension
 - **Backup Strategy**: All code versioned in Git
+- **Isaac ROS Packages Used**:
+  - `isaac_ros_realsense` – depth camera driver
+  - `isaac_ros_nvblox` – 3D scene reconstruction
+  - `nvblox_examples_bringup` – pre-configured launch files
+  - `nvblox_ros`, `nvblox_msgs`, `nvblox_rviz_plugin` – utilities
 
 ---
 
-**Last Updated**: Feb 4, 2026  
+**Last Updated**: Feb 5, 2026  
 **Authored By**: Arash  
-**Status**: Active Development
+**Status**: Active Development – Phase 0 complete, Iteration 1 ready to start
