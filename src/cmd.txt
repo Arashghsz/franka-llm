@@ -41,3 +41,7 @@ moveit activation:
 cd ~/franka_ros2_ws && source install/setup.zsh && ros2 launch franka_fr3_moveit_config moveit.launch.py robot_ip:=172.16.0.2 use_fake_hardwar:=false
 VLM:
 source /opt/ros/humble/setup.bash && source install/setup.bash && export ROS_DOMAIN_ID=42 && ros2 run franka_llm_planner vlm_test_image --ros-args -p image_url:='https://images.unsplash.com/photo-1559827260-dc66d52bef19?w=400'" 
+
+demo.py:
+source install/setup.zsh
+python3 src/franka_llm_planner/franka_llm_planner/demo.py
