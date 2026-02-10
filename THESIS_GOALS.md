@@ -23,27 +23,27 @@
 │  │  - Input: /vlm_request (image + plan)                  │  │
 │  │  - Output: /vlm_grounding (target label + rationale)   │  │
 │  └────────────────────────────────────────────────────────┘  │
-│                       ↓                                      │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  RealSense Camera (RGB-D)                              │  │
-│  └────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────┘
          ↕ ROS 2 Network (pub/sub)
 ┌──────────────────────────────────────────────────────────────┐
 │                 CONTROLLER PC (Execution)                    │
 │                                                              │
 │  ┌────────────────────────────────────────────────────────┐  │
+│  │  RealSense Camera (RGB-D)                              │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                       ↓                                      │
+│  ┌────────────────────────────────────────────────────────┐  │
 │  │  YOLO Detector (Precise Localization)                  │  │
 │  │  - Input: /vlm_grounding + /camera/color/image_raw     │  │
 │  │  - Output: /target_detection (bbox + depth)            │  │
 │  └────────────────────────────────────────────────────────┘  │
-│                       ↓                                      │
+│                       ↓                                      │  │
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │  Coordinator Node                                      │  │
 │  │  - Orchestrates: LLM → VLM → YOLO → Motion             │  │
 │  │  - Handles user confirmation before execution          │  │
 │  └────────────────────────────────────────────────────────┘  │
-│                       ↓                                      │
+│                       ↓                                      │  │
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │  Motion Execution Layer                                │  │
 │  │  - MoveIt 2 + cuMotion                                 │  │
@@ -58,19 +58,19 @@ UI: Single-page web dashboard (HTML/CSS/JS + jQuery) shows chat, live camera, st
 
 ## Deployment Split
 
-- **Jetson**: LLM + VLM only (plus camera drivers)
-- **Controller PC**: YOLO detection, Coordinator, Motion Execution, UI, Conversation Logger
+- **Jetson**: LLM + VLM only
+- **Controller PC**: Cameras + YOLO detection + Coordinator + Motion Execution + UI + Conversation Logger
 
 ---
 
 ## Implementation Status
 
-### Phase 0: Perception & 3D Mapping (Jetson) - **COMPLETE** ✅
-- [x] RealSense D415 camera plugged into Jetson (fixed, overhead viewpoint)
+### Phase 0: Perception & 3D Mapping (Controller PC) - **COMPLETE** ✅
+- [x] RealSense D415 camera plugged into Controller PC (fixed, overhead viewpoint)
 - [x] Isaac ROS RealSense driver running (publishes depth + RGB)
 - [x] Isaac ROS NVBlox 3D reconstruction pipeline active
 - [x] 3D scene map published on `/nvblox_node/static_esdf_pointcloud`
-- [x] Network verified: RTX6000 receives all topics over ROS_DOMAIN_ID=42
+- [x] Network verified: Jetson receives required topics over ROS_DOMAIN_ID=42
 
 ### Phase 1: Task Planner (LLM) - **IN PROGRESS**
 - [x] Basic LLM node with Ollama integration
@@ -143,5 +143,5 @@ Implement and evaluate a distributed system where:
 
 ---
 
-**Last Updated**: 2026-02-10 15:41:00  
+**Last Updated**: 2026-02-10 15:44:00  
 **Authored By**: Arash
