@@ -44,4 +44,4 @@ source /opt/ros/humble/setup.bash && source install/setup.bash && export ROS_DOM
 
 demo.py:
 source install/setup.zsh
-python3 src/franka_llm_planner/franka_llm_planner/demo.py
+python3 src/franka_motion_executor/franka_motion_executor/demo.py
