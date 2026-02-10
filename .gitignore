@@ -25,3 +25,6 @@ src/isaac_ros_cumotion/
 # OS
 .DS_Store
 Thumbs.db
+# yolov8
+yolov8n.pt
+yolov8x.pt
