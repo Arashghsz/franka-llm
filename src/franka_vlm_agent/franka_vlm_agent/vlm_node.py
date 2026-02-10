@@ -8,7 +8,7 @@ Publishes explanation of table contents to /vlm/explanation
 
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CompressedImage
 from std_msgs.msg import String
 import cv2
 import numpy as np
@@ -28,6 +28,7 @@ class VLMNode(Node):
         
         # Declare parameters
         self.declare_parameter('camera_topic', '/camera/color/image_raw')
+        self.declare_parameter('use_compressed', True)  # Use compressed images by default for network efficiency
         self.declare_parameter('ollama_host', 'http://localhost:11434')
         self.declare_parameter('vlm_model', 'llava:7b')
         self.declare_parameter('analysis_rate', 1.0)  # Hz
@@ -36,6 +37,7 @@ class VLMNode(Node):
         
         # Get parameters
         self.camera_topic = self.get_parameter('camera_topic').value
+        self.use_compressed = self.get_parameter('use_compressed').value
         self.ollama_host = self.get_parameter('ollama_host').value
         self.vlm_model = self.get_parameter('vlm_model').value
         self.analysis_rate = self.get_parameter('analysis_rate').value
@@ -45,13 +47,23 @@ class VLMNode(Node):
         # Initialize CV Bridge
         self.bridge = CvBridge()
         
-        # Subscribe to camera
-        self.image_sub = self.create_subscription(
-            Image,
-            self.camera_topic,
-            self.image_callback,
-            10
-        )
+        # Subscribe to camera (compressed or raw)
+        if self.use_compressed:
+            # Subscribe to compressed images (better for network transmission)
+            self.image_sub = self.create_subscription(
+                CompressedImage,
+                self.camera_topic + '/compressed',
+                self.compressed_image_callback,
+                10
+            )
+        else:
+            # Subscribe to raw images
+            self.image_sub = self.create_subscription(
+                Image,
+                self.camera_topic,
+                self.image_callback,
+                10
+            )
         
         # Publish analysis results
         self.analysis_pub = self.create_publisher(
@@ -79,6 +91,7 @@ class VLMNode(Node):
         self.get_logger().info(
             f'VLM Node initialized:\n'
             f'  Camera topic: {self.camera_topic}\n'
+            f'  Use compressed: {self.use_compressed}\n'
             f'  Ollama host: {self.ollama_host}\n'
             f'  VLM model: {self.vlm_model}\n'
             f'  Analysis rate: {self.analysis_rate} Hz\n'
@@ -132,6 +145,22 @@ class VLMNode(Node):
                 
         except Exception as e:
             self.get_logger().error(f'Error in image callback: {str(e)}')
+    
+    def compressed_image_callback(self, msg: CompressedImage):
+        """Receive and decompress latest compressed image"""
+        try:
+            # Decompress image
+            np_arr = np.frombuffer(msg.data, np.uint8)
+            self.latest_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            
+            # Check if enough time has passed since last analysis
+            current_time = time.time()
+            if current_time - self.last_analysis_time >= self.min_interval:
+                self.process_image()
+                self.last_analysis_time = current_time
+                
+        except Exception as e:
+            self.get_logger().error(f'Error in compressed image callback: {str(e)}')
     
     def process_image(self):
         """Process the latest image with VLM"""
