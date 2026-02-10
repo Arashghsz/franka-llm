@@ -1,6 +1,6 @@
-# VLM-Only Pick & Place Architecture Report
+# VLM + LLM Pick & Place Architecture Report
 
-**Date**: 2026-02-10 22:09:12  
+**Date**: 2026-02-10 22:21:58  
 **Author**: Arash (with Copilot analysis)  
 **Status**: Proposal / Architecture Decision  
 
@@ -8,86 +8,28 @@
 
 ## Summary
 
-This report proposes **dropping YOLO/Detectron2** from the pipeline and performing pick & place using **LLM + VLM only**, with depth from the existing RealSense RGB-D camera. This simplifies the architecture, reduces dependencies, and makes a stronger thesis contribution.
+This report defines the architecture for performing **pick & place using LLM + VLM only** — no YOLO, no Detectron2, no traditional object detectors. The evaluation focuses on **comparing different VLM and LLM models** against each other in terms of response time, grounding accuracy, localization precision, and pick & place success rate.
+
+Depth is obtained from the existing **RealSense RGB-D camera** by projecting VLM-provided bounding boxes into the depth map.
 
 ---
 
-## Current Architecture (LLM → VLM → YOLO → Motion)
-
-```
-User Command → LLM (plan) → VLM (identify object) → YOLO (bbox + depth) → Motion (pick & place)
-```
-
-- YOLO provides **bounding box + depth** for precise localization
-- VLM provides **semantic grounding** (text description only)
-- This requires training/maintaining a separate object detector
-
-## Proposed Architecture (LLM → VLM → Motion)
+## Architecture: LLM → VLM → Depth → Motion
 
 ```
 User Command → LLM (plan) → Grounding VLM (identify + locate) → Depth Lookup → Motion (pick & place)
 ```
 
-- VLM provides **both** semantic understanding AND pixel-level localization
-- Depth comes from **RealSense depth map** (already available)
-- No YOLO, no Detectron2, no task-specific detector
+- **LLM** generates a task plan from natural language
+- **VLM** identifies the target object AND returns pixel-level bounding box
+- **Depth** is resolved from RealSense depth map using the VLM's bounding box
+- **Motion** executes pick & place via MoveIt 2
+
+**No YOLO. No Detectron2. No task-specific detector at any stage.**
 
 ---
 
-## Why This Works
-
-### The Core Insight
-
-The only thing YOLO provides that VLM doesn't (currently) is a **bounding box in pixel coordinates**. Once you have a bounding box:
-
-```
-bbox centroid (u, v) → RealSense depth at (u, v) → 3D point (x, y, z) → MoveIt 2 goal
-```
-
-**A grounding-capable VLM can output bounding boxes natively**, replacing YOLO entirely.
-
-### What the Current `vlm_node.py` Returns (Text Only)
-
-```
-"There's a red cup on the left side of the table, a green cube in the center..."
-```
-
-This is **not actionable** for motion planning — you can't convert "left side" to robot coordinates.
-
-### What a Grounding VLM Returns (Bbox + Text)
-
-```json
-{
-  "target": "red cup",
-  "bbox": [234, 156, 310, 245],
-  "rationale": "Red cup identified on the left side of the table"
-}
-```
-
-This IS actionable: `bbox centroid → depth lookup → 3D coordinates → MoveIt 2`.
-
----
-
-## Grounding VLM Options for Jetson AGX Orin
-
-| Model | Parameters | Runs on Jetson? | Output Type | Spatial Accuracy | Notes |
-|-------|-----------|:---------------:|-------------|:----------------:|-------|
-| **Florence-2** | ~2B | ✅ Yes | Bbox coordinates | Good (~±10px) | Best balance of speed + accuracy |
-| **Qwen-VL** | 7B | ✅ Via Ollama | `<box>x1,y1,x2,y2</box>` | Good | Already compatible with Ollama setup |
-| **CogVLM** | 17B | ⚠️ Tight fit | Bbox coordinates | Very Good | May need quantization |
-| **LLaVA 7B (current)** | 7B | ✅ Already running | Text only (can prompt-hack for coords) | Poor (~±50-100px) | Not recommended for localization |
-| **Grounding DINO + SAM** | ~1B+~600M | ✅ Yes | Bbox + segmentation mask | Excellent | Two models, more complex integration |
-
-### Recommendation: **Florence-2** or **Qwen-VL**
-
-- **Florence-2**: Lightweight, fast, natively outputs bboxes via `<CAPTION_TO_PHRASE_GROUNDING>` task. Ideal for Jetson.
-- **Qwen-VL**: Already works with Ollama (same setup as LLaVA). Returns bbox in structured format. Easier migration path.
-
----
-
-## Proposed Simplified Pipeline
-
-### System Architecture (3 nodes instead of 5)
+## System Architecture
 
 ```
 ┌──────────────────── JETSON AGX ORIN ────────────────────┐
@@ -127,15 +69,18 @@ This IS actionable: `bbox centroid → depth lookup → 3D coordinates → MoveI
 └──────────────────────────────────────────────────────────┘
 ```
 
-### Depth Resolution Process (Replaces YOLO)
+---
+
+## Depth Resolution: VLM Bbox → 3D Coordinates
+
+The key insight: once the VLM provides a **bounding box in pixel coordinates**, we use the RealSense depth image to get the 3D position. No object detector needed.
 
 ```python
-# Pseudo-code for depth resolution from VLM bbox
 def resolve_3d_position(bbox, depth_image, camera_intrinsics):
     """Convert VLM bounding box to 3D coordinates"""
     # 1. Get bbox centroid
-    cx = (bbox[0] + bbox[2]) / 2  # center x pixel
-    cy = (bbox[1] + bbox[3]) / 2  # center y pixel
+    cx = (bbox[0] + bbox[2]) / 2
+    cy = (bbox[1] + bbox[3]) / 2
     
     # 2. Look up depth at centroid (with median filter for robustness)
     roi = depth_image[bbox[1]:bbox[3], bbox[0]:bbox[2]]
@@ -157,61 +102,117 @@ def resolve_3d_position(bbox, depth_image, camera_intrinsics):
 
 ---
 
-## What Changes in the Codebase
+## Evaluation: VLM Model Comparison
 
-### Modify: `franka_vlm_agent`
-- Upgrade `vlm_node.py` to use a **grounding VLM** (Florence-2 or Qwen-VL)
-- Change prompt from "describe the scene" to "locate the target object and return bounding box"
-- Publish structured output (JSON with bbox + label + rationale) instead of plain text
+The thesis evaluation compares **different VLM and LLM models** against each other — NOT against YOLO/Detectron2. The goal is to find the best VLM+LLM combination for edge-based robotic pick & place.
 
-### Modify: `franka_coordinator`
-- Add **depth resolution** logic (bbox → depth → 3D point)
-- Subscribe to `/vlm_grounding` (with bbox) instead of `/target_detection` (from YOLO)
-- The rest of the orchestration stays the same
+### VLM Models to Compare
 
-### Keep As-Is:
-- `franka_llm_planner` — still generates the plan
-- `franka_motion_executor` — still executes MoveIt 2 goals
-- `realsense_cameras` — still publishes RGB-D
+| Model | Parameters | Runtime (Jetson) | Grounding Type | Bbox Output | Notes |
+|-------|-----------|:---------------:|----------------|:-----------:|-------|
+| **LLaVA 7B** | 7B | ✅ Via Ollama | Text-based (prompt hack for coords) | Approximate | Already running; baseline VLM |
+| **LLaVA 13B** | 13B | ⚠️ Quantized | Text-based | Approximate | Heavier, potentially more accurate descriptions |
+| **Florence-2** | ~2B | ✅ Native | Native grounding (`CAPTION_TO_PHRASE_GROUNDING`) | Precise bbox | Lightweight, fast, purpose-built for grounding |
+| **Qwen-VL / Qwen2-VL** | 7B | ✅ Via Ollama | Native grounding (`<box>` tags) | Precise bbox | Ollama-compatible, structured bbox output |
+| **CogVLM** | 17B | ⚠️ Needs quantization | Native grounding | Precise bbox | High accuracy, resource heavy |
+| **VILA** | 7B | ✅ Via NVIDIA | Native (NVIDIA optimized for Jetson) | Precise bbox | NVIDIA's VLM, optimized for Jetson hardware |
 
-### Can Remove / Demote:
-- `franka_vision_detection` (YOLO) — not needed in the core pipeline
-  - Could keep as a **baseline comparison** for the thesis evaluation
+### LLM Models to Compare (Task Planning)
+
+| Model | Parameters | Runtime (Jetson) | Planning Quality | Notes |
+|-------|-----------|:---------------:|:----------------:|-------|
+| **Llama 3 8B** | 8B | ✅ Via Ollama | Good | General purpose, strong reasoning |
+| **Mistral 7B** | 7B | ✅ Via Ollama | Good | Fast, efficient |
+| **Phi-3 Mini** | 3.8B | ✅ Via Ollama | Moderate | Very lightweight, fastest response |
+| **Gemma 2 9B** | 9B | ⚠️ Quantized | Good | Google's model, strong instruction following |
+
+### Evaluation Metrics
+
+#### Per-Model Metrics
+| Metric | Description | How to Measure |
+|--------|-------------|----------------|
+| **Inference latency** | Time from image input to VLM response | Timestamp diff (ms) |
+| **Grounding accuracy** | Does the VLM identify the correct object? | Manual verification per trial |
+| **Bbox precision** | How close is the VLM bbox to the actual object? | IoU against manually annotated ground truth |
+| **Depth accuracy** | How close is the resolved 3D point to the real object? | Compare with measured ground truth position (mm) |
+| **Pick & place success rate** | Did the robot successfully pick and place? | Binary success/fail per trial |
+| **End-to-end latency** | Total time from user command to motion completion | Full pipeline timestamp (s) |
+| **Memory usage** | GPU/RAM consumption on Jetson | `tegrastats` monitoring |
+| **Open-vocabulary handling** | Can it ground novel/unseen objects? | Test with unusual object descriptions |
+
+#### Comparison Dimensions
+| Comparison | What It Reveals |
+|-----------|-----------------|
+| **VLM A vs VLM B** (same LLM) | Which VLM is best for grounding on Jetson? |
+| **LLM A vs LLM B** (same VLM) | Which LLM produces better task plans? |
+| **Small vs Large models** | Latency-accuracy tradeoff on edge hardware |
+| **Grounding VLM vs Text-only VLM** | Is native bbox output necessary, or can prompt-based coords work? |
+| **Quantized vs Full precision** | Impact of quantization on grounding accuracy |
+
+### Evaluation Scenarios (3-5 pick & place tasks)
+
+| Scenario | Command | Difficulty | Tests |
+|----------|---------|:----------:|-------|
+| **S1: Single object** | "Pick up the red cup" | Easy | Basic grounding + localization |
+| **S2: Disambiguation** | "Pick up the cup closest to the robot" | Medium | Spatial reasoning |
+| **S3: Multi-step** | "Move the apple to the left side of the table" | Medium | Pick + place + spatial understanding |
+| **S4: Open vocabulary** | "Pick up the shiny thing" | Hard | Abstract/novel object description |
+| **S5: Cluttered scene** | "Pick up the screwdriver from the toolbox" | Hard | Grounding in complex scenes |
+
+### Results Table Template
+
+| Model Combination | S1 Success | S2 Success | S3 Success | S4 Success | S5 Success | Avg Latency | Bbox IoU | Depth Error |
+|-------------------|:----------:|:----------:|:----------:|:----------:|:----------:|:-----------:|:--------:|:-----------:|
+| Llama3 + Florence-2 | | | | | | ms | | mm |
+| Llama3 + Qwen-VL | | | | | | ms | | mm |
+| Llama3 + LLaVA 7B | | | | | | ms | | mm |
+| Llama3 + VILA | | | | | | ms | | mm |
+| Mistral + Florence-2 | | | | | | ms | | mm |
+| Phi-3 + Florence-2 | | | | | | ms | | mm |
 
 ---
 
-## Impact on Thesis Evaluation
+## Codebase Changes
 
-Your evaluation plan already includes comparing different configurations. This strengthens it:
+### Modify: `franka_vlm_agent`
+- Make `vlm_node.py` **model-agnostic**: support swapping between VLM backends (LLaVA, Florence-2, Qwen-VL, VILA)
+- Add a `vlm_model` parameter to select the active model at launch
+- Output structured JSON (bbox + label + rationale) on `/vlm_grounding`
 
-| Configuration | What It Tests |
-|--------------|---------------|
-| **LLM + Grounding VLM** (proposed main) | Can edge VLM do grounding + localization for pick & place? |
-| **YOLO-only** (baseline) | Traditional detection-based pick & place |
-| **VLM + YOLO hybrid** (optional comparison) | Does adding YOLO on top of VLM improve anything? |
+### Modify: `franka_llm_planner`
+- Make LLM model **swappable** via parameter (Llama3, Mistral, Phi-3)
+- Ensure consistent JSON output format regardless of LLM backend
 
-### Metrics to Report
-- **Localization accuracy**: VLM bbox vs YOLO bbox (IoU comparison)
-- **End-to-end success rate**: Pick & place completion
-- **Latency**: VLM inference time on Jetson (~10-15s for LLaVA, ~2-3s for Florence-2)
-- **Generalization**: Can VLM handle objects YOLO wasn't trained on?
+### Modify: `franka_coordinator`
+- Add **depth resolution** logic (bbox → depth → 3D point)
+- Subscribe to `/vlm_grounding` with bbox data
+- Orchestrate: LLM → VLM → Depth → Motion
+
+### Remove: `franka_vision_detection`
+- YOLO/Detectron2 package is **not part of the architecture**
+- Can be kept in repo for reference but is not in the pipeline
+
+### Keep As-Is:
+- `franka_motion_executor` — executes MoveIt 2 goals
+- `realsense_cameras` — publishes RGB-D
 
 ---
 
 ## Thesis Contribution Statement
 
-> *"We demonstrate that a Vision-Language Model running on edge hardware (Jetson AGX Orin) can perform both semantic understanding and spatial grounding for robotic manipulation — eliminating the need for task-specific object detectors (YOLO/Detectron2). Our distributed LLM+VLM architecture achieves pick & place with [X]% success rate while supporting open-vocabulary object references through natural language commands."*
+> *"We present a distributed LLM+VLM architecture for robotic pick & place running entirely on edge hardware (Jetson AGX Orin), eliminating the need for task-specific object detectors. We evaluate multiple Vision-Language Models (Florence-2, Qwen-VL, LLaVA, VILA) and Large Language Models (Llama 3, Mistral, Phi-3) for their effectiveness in spatial grounding and task planning on a Franka FR3 manipulator, analyzing inference latency, grounding accuracy, and pick & place success rate to determine the optimal model combination for edge-based robotic manipulation."*
 
 ---
 
 ## Next Steps
 
-1. **Choose grounding VLM**: Test Florence-2 and Qwen-VL on Jetson AGX Orin
-2. **Modify `vlm_node.py`**: Output bbox coordinates instead of text descriptions
-3. **Add depth resolution**: Implement bbox → depth → 3D point in coordinator
-4. **Test end-to-end**: LLM plan → VLM bbox → depth → MoveIt 2 pick & place
-5. **Evaluate**: Compare VLM-only vs YOLO baseline on 3-5 pick & place scenarios
+1. **Benchmark VLM models on Jetson**: Run Florence-2, Qwen-VL, LLaVA 7B, VILA — measure latency and grounding accuracy
+2. **Benchmark LLM models on Jetson**: Run Llama3, Mistral, Phi-3 — measure planning quality and latency
+3. **Make `vlm_node.py` model-agnostic**: Support swapping VLM backends via ROS parameter
+4. **Implement depth resolution**: bbox → RealSense depth → 3D coordinates
+5. **Run evaluation scenarios**: S1-S5 across all model combinations
+6. **Analyze results**: Find optimal model combination for edge pick & place
 
 ---
 
-**Conclusion**: Dropping YOLO and using a grounding VLM is not only feasible — it makes a **cleaner architecture, a stronger thesis contribution, and a more novel system**. The key enabler is using a VLM that outputs bounding boxes (Florence-2 or Qwen-VL) combined with the RealSense depth camera you already have.
+**Conclusion**: The thesis focuses purely on **LLM + VLM driven robotic manipulation** — comparing different foundation models for task planning and visual grounding on edge hardware. No traditional object detectors are used. The evaluation determines which VLM and LLM combination provides the best tradeoff between accuracy, latency, and robustness for real-world pick & place on a Franka FR3.
