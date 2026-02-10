@@ -25,12 +25,6 @@
 │  └────────────────────────────────────────────────────────┘  │
 │                       ↓                                      │
 │  ┌────────────────────────────────────────────────────────┐  │
-│  │  YOLO Detector (Precise Localization)                  │  │
-│  │  - Input: /vlm_grounding + /camera/color/image_raw     │  │
-│  │  - Output: /target_detection (bbox + depth)            │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                       ↓                                      │
-│  ┌────────────────────────────────────────────────────────┐  │
 │  │  RealSense Camera (RGB-D)                              │  │
 │  └────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────┘
@@ -38,6 +32,12 @@
 ┌──────────────────────────────────────────────────────────────┐
 │                 CONTROLLER PC (Execution)                    │
 │                                                              │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │  YOLO Detector (Precise Localization)                  │  │
+│  │  - Input: /vlm_grounding + /camera/color/image_raw     │  │
+│  │  - Output: /target_detection (bbox + depth)            │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                       ↓                                      │
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │  Coordinator Node                                      │  │
 │  │  - Orchestrates: LLM → VLM → YOLO → Motion             │  │
@@ -53,6 +53,13 @@
 
 UI: Single-page web dashboard (HTML/CSS/JS + jQuery) shows chat, live camera, status, and confirmation.
 ```
+
+---
+
+## Deployment Split
+
+- **Jetson**: LLM + VLM only (plus camera drivers)
+- **Controller PC**: YOLO detection, Coordinator, Motion Execution, UI, Conversation Logger
 
 ---
 
@@ -81,32 +88,34 @@ UI: Single-page web dashboard (HTML/CSS/JS + jQuery) shows chat, live camera, st
 - [ ] Integrate real VLM model (LLaVA / VILA)
 - [ ] Output target label and rationale for YOLO filtering
 
-### Phase 3: YOLO Detection (Precise Localization) - **IN PROGRESS**
+### Phase 3: YOLO Detection (Precise Localization) - **IN PROGRESS** (Controller PC)
 - [x] YOLO package exists as `franka_vision_detection`
 - [ ] Subscribe to `/vlm_grounding` + camera image
 - [ ] Publish `/target_detection` (bbox + depth)
 - [ ] Validate latency and detection stability
 
-### Phase 4: Motion Execution - **PARTIAL**
+### Phase 4: Motion Execution - **PARTIAL** (Controller PC)
 - [x] Basic joint control (demo.py on RTX6000)
 - [x] MoveIt 2 integration
 - [ ] Pick & place primitives
 - [ ] Perception-aware planning (use target detection + 3D map)
 - [ ] Feedback loop (`/execution_status`) to coordinator
 
-### Phase 5: Coordinator - **NOT STARTED**
+### Phase 5: Coordinator - **NOT STARTED** (Controller PC)
 - [ ] LLM → VLM → YOLO → Motion orchestration
 - [ ] Subscribes: `/planned_action`, `/vlm_grounding`, `/target_detection`
 - [ ] Publishes: `/execution_status`, `/execution_goal`
 - [ ] Requires user confirmation before execution
 - [ ] Error recovery and timeout handling
 
-### Phase 6: UI (Single-Page Dashboard) - **NOT STARTED**
+### Phase 6: UI (Single-Page Dashboard) - **NOT STARTED** (Controller PC)
 - [ ] Chat panel (all agents)
 - [ ] User input box
 - [ ] Live camera feed
 - [ ] Status panel
 - [ ] Confirmation step before execution
+- [ ] Chat starts with assistant greeting (e.g., "Hi, I'm Franka, your assistant")
+- [ ] Every agent/status log appears in the chat timeline
 
 ---
 
@@ -125,6 +134,7 @@ Implement and evaluate a distributed system where:
 ### Multi-Agent & Conversation Logging Goal
 - All inter-agent messages (user → LLM → VLM → YOLO → Coordinator → Motion) are logged as a chat-like transcript.
 - UI shows full agent chat + execution status + confirmation step.
+- UI starts with an assistant greeting and keeps a full timeline of logs.
 
 ### Task Evaluation
 - [ ] Implement 3-5 pick & place scenarios
@@ -133,26 +143,5 @@ Implement and evaluate a distributed system where:
 
 ---
 
-## Next Steps (Immediate)
-
-### Iteration 1: Logging + UI Skeleton
-- [ ] Conversation logger (JSONL)
-- [ ] Simple SPA UI (HTML/CSS/JS + jQuery)
-- [ ] Display chat + camera + status
-
-### Iteration 2: VLM Grounding
-- [ ] Define `/vlm_request`, `/vlm_grounding`
-- [ ] Connect VLM to camera image
-
-### Iteration 3: YOLO Target Detection
-- [ ] Filter YOLO detections using VLM grounding
-- [ ] Publish `/target_detection`
-
-### Iteration 4: Full Orchestration
-- [ ] Coordinator + confirmation step
-- [ ] Motion execution from target detection
-
----
-
-**Last Updated**: 2026-02-10 15:29:24  
+**Last Updated**: 2026-02-10 15:41:00  
 **Authored By**: Arash
