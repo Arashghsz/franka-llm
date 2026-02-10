@@ -10,15 +10,19 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/launch', glob('launch/*.py')),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'requests', 'pillow', 'opencv-python'],
     zip_safe=True,
     maintainer='arash',
     maintainer_email='ghasemzadehh.arash@gmail.com',
-    description='VLM Agent for Franka',
+    description='VLM Agent for Franka - LLaVA 7B on Jetson',
     license='MIT',
     entry_points={
         'console_scripts': [
+            'vlm_node=franka_vlm_agent.vlm_node:main',
+            'vlm_test=franka_vlm_agent.vlm_test:main',
         ],
     },
 )
+
