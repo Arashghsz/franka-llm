@@ -1,15 +1,7 @@
-# 🤖 ROS 2 Learning Guide for Beginners
+# 🤖 ROS 2 Learning Guide
 
-## Your Setup
+## Setup
 - **Platform**: Jetson AGX Orin (MAXN mode)
-- **ROS 2 Version**: Humble
-- **Robots**: Franka Research 3, Unitree Go2
-- **Sensors**: Intel RealSense RGB-D Camera 
-- **ROS isaac**: release-3.2
-- **ROS isaac source**: https://nvidia-isaac-ros.github.io/v/release-3.2/index.html
-
-
-
 ---
 
 ## 📚 Core Concepts
@@ -101,49 +93,6 @@ ros2 launch <package> <launch_file>  # Start a launch file
 ros2 run <package> <executable>   # Run a single node
 ```
 
----
-
-## 🔧 Your Robotics Stack Explained
-
-### For Franka Pick & Place:
-
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  RealSense      │────▶│  Isaac ROS      │────▶│  MoveIt 2       │
-│  Camera         │     │  NVBLOX         │     │  + cuMotion     │
-│  (RGB-D data)   │     │  (3D map)       │     │  (motion plan)  │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-                                                        │
-                                                        ▼
-                                               ┌─────────────────┐
-                                               │  Franka Robot   │
-                                               │  (executes)     │
-                                               └─────────────────┘
-```
-
-### Key Components:
-1. **RealSense Camera** → Captures RGB + Depth images
-2. **Isaac ROS NVBLOX** → Creates 3D reconstruction for obstacle avoidance
-3. **MoveIt 2** → Motion planning framework
-4. **Isaac ROS cuMotion** → GPU-accelerated motion planning (NVIDIA)
-5. **Franka Hardware** → Robot arm control
-
----
-
-## 🚀 Hands-On Exercises
-
-### Exercise 1: Explore Topics
-```bash
-# Start RealSense camera
-ros2 launch realsense2_camera rs_launch.py
-
-# In another terminal, list camera topics
-ros2 topic list | grep camera
-
-# Check image topic frequency
-ros2 topic hz /camera/color/image_raw
-```
-
 ### Exercise 2: Visualize in RViz
 ```bash
 # Start RViz (ROS visualization tool)
@@ -181,25 +130,6 @@ ros2 topic pub /go2/cmd_vel geometry_msgs/msg/Twist \
 
 ---
 
-## 🛠️ Common Workflows
-
-### Launch RealSense Camera
-```bash
-ros2 launch realsense2_camera rs_launch.py depth_module.profile:=640x480x30 rgb_camera.profile:=640x480x30
-```
-
-### Launch Franka Robot
-```bash
-ros2 launch franka_bringup franka.launch.py robot_ip:=<YOUR_FRANKA_IP>
-```
-
-### Launch MoveIt with cuMotion
-```bash
-ros2 launch isaac_ros_cumotion_examples franka_isaac_sim.launch.py
-```
-
----
-
 ## 💡 Tips
 
 1. **Always source ROS 2**: Your zshrc does this automatically ✅
@@ -207,13 +137,3 @@ ros2 launch isaac_ros_cumotion_examples franka_isaac_sim.launch.py
 3. **Use `--help`**: Most commands have help, e.g., `ros2 topic --help`
 4. **Multiple terminals**: ROS 2 uses many terminals - use tmux or terminator
 5. **Check errors first**: `ros2 doctor` can diagnose issues
-
----
-
-## Next Steps
-
-1. ✅ Isaac ROS installed
-2. ⬜ Test RealSense camera
-3. ⬜ Test Franka connection
-4. ⬜ Run basic MoveIt demo
-5. ⬜ Set up pick & place pipeline
