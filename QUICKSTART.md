@@ -45,6 +45,16 @@ python3 src/simple_terminal_chat.py
 
 ## Example Usage
 
+### Conversational Inspection
+```
+> what do you see at the table?
+[LLM] Action: inspect, Target: table
+[VLM] I can see several objects on the table including a red plastic cup 
+      on the left side, a green apple in the center, and a screwdriver 
+      near the right edge. The table surface appears to be light colored.
+```
+
+### Object Localization (Pick & Place)
 ```
 > pick up the red cup
 [LLM] Action: pick, Target: red cup

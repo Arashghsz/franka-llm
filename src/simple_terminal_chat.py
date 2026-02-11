@@ -35,6 +35,9 @@ class SimpleChatNode(Node):
         self.vlm_grounding_sub = self.create_subscription(
             String, '/vlm_grounding', self.grounding_callback, 10
         )
+        self.vlm_explanation_sub = self.create_subscription(
+            String, '/vlm/explanation', self.explanation_callback, 10
+        )
         self.target_position_sub = self.create_subscription(
             PoseStamped, '/target_position', self.position_callback, 10
         )
@@ -57,8 +60,18 @@ class SimpleChatNode(Node):
                 
                 print(f'[LLM] Action: {action}, Target: {target}')
                 
-                if target:
-                    # Send to VLM for grounding
+                # Handle inspection/observation - just describe the scene
+                if action in ['inspect', 'look', 'observe', 'see', 'describe']:
+                    print(f'[System] Requesting scene description from VLM...')
+                    # Trigger scene analysis by requesting analysis
+                    # VLM will publish to /vlm/explanation
+                    analyze_request = {'type': 'scene_description', 'query': target if target else 'table'}
+                    msg = String()
+                    msg.data = json.dumps(analyze_request)
+                    self.vlm_request_pub.publish(msg)
+                    
+                elif target:
+                    # Grounding request - locate specific object
                     print(f'[System] Requesting VLM to locate "{target}"...')
                     vlm_request = {'target': target, 'task': action}
                     
@@ -89,6 +102,13 @@ class SimpleChatNode(Node):
             
         except Exception as e:
             self.get_logger().error(f'Error parsing VLM grounding: {e}')
+    
+    def explanation_callback(self, msg: String):
+        """Handle VLM scene description/explanation"""
+        print(f'\n[VLM] {msg.data}')
+        print('\n' + '='*60)
+        print('Ready for next command')
+        print('> ', end='', flush=True)
     
     def position_callback(self, msg: PoseStamped):
         """Handle 3D position result"""

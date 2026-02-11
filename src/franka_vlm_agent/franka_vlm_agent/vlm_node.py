@@ -217,10 +217,25 @@ class VLMNode(Node):
     def grounding_request_callback(self, msg: String):
         """
         Handle grounding requests from LLM/coordinator
-        Expected format: JSON with {"target": "red cup", "task": "pick"}
+        Expected format: 
+        - Grounding: {"target": "red cup", "task": "pick"}
+        - Scene description: {"type": "scene_description", "query": "table"}
         """
         try:
             request = json.loads(msg.data)
+            
+            # Check if this is a scene description request
+            if request.get('type') == 'scene_description':
+                if self.latest_image is None:
+                    self.get_logger().warn('Scene description requested but no image available')
+                    return
+                
+                self.get_logger().info('Scene description requested')
+                # Process image for scene description
+                self.process_image()
+                return
+            
+            # Otherwise, it's a grounding request
             target = request.get('target', '')
             
             if not target or self.latest_image is None:
