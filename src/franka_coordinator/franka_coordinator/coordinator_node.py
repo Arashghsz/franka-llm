@@ -12,10 +12,13 @@ import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from std_msgs.msg import String, Bool
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Point
+from sensor_msgs.msg import Image, CameraInfo
 import json
 from datetime import datetime
 from enum import Enum
+import numpy as np
+from cv_bridge import CvBridge
 
 # Message types (we'll use std_msgs.String with JSON for now)
 class TaskStatus(Enum):
@@ -39,6 +42,11 @@ class FrankaCoordinator(Node):
         self.current_task = None
         self.task_status = TaskStatus.PENDING.value
         
+        # Depth resolution data
+        self.latest_depth_image = None
+        self.camera_intrinsics = None
+        self.bridge = CvBridge()
+        
         # Publisher for outgoing commands
         self.llm_request_pub = self.create_publisher(
             String, '/llm/request', 10
@@ -47,12 +55,17 @@ class FrankaCoordinator(Node):
             String, '/motion/command', 10
         )
         self.vlm_request_pub = self.create_publisher(
-            String, '/vlm/analyze_request', 10
+            String, '/vlm_request', 10  # Updated topic name
         )
         
         # Status publishers
         self.status_pub = self.create_publisher(
             String, '/coordinator/status', 10
+        )
+        
+        # Publisher for 3D target position
+        self.target_position_pub = self.create_publisher(
+            PoseStamped, '/target_position', 10
         )
         
         # Subscriber for web dashboard requests
@@ -70,6 +83,9 @@ class FrankaCoordinator(Node):
         self.vlm_response_sub = self.create_subscription(
             String, '/vlm/analysis', self.handle_vlm_response, 10
         )
+        self.vlm_grounding_sub = self.create_subscription(
+            String, '/vlm_grounding', self.handle_vlm_grounding, 10
+        )
         self.motion_status_sub = self.create_subscription(
             String, '/motion/status', self.handle_motion_status, 10
         )
@@ -77,6 +93,20 @@ class FrankaCoordinator(Node):
         # Subscriber for robot state
         self.robot_state_sub = self.create_subscription(
             String, '/robot/state', self.handle_robot_state, 10
+        )
+        
+        # Subscribers for depth image and camera info
+        self.depth_sub = self.create_subscription(
+            Image,
+            '/cameras/ee/ee_camera/aligned_depth_to_color/image_raw',
+            self.depth_callback,
+            10
+        )
+        self.camera_info_sub = self.create_subscription(
+            CameraInfo,
+            '/cameras/ee/ee_camera/color/camera_info',
+            self.camera_info_callback,
+            10
         )
         
         # Timer for periodic status checks
@@ -226,6 +256,128 @@ class FrankaCoordinator(Node):
             self.robot_status = "connected" if state.get('connected', False) else "disconnected"
         except Exception as e:
             self.robot_status = "disconnected"
+    
+    def depth_callback(self, msg: Image):
+        """Store latest depth image for 3D position resolution"""
+        try:
+            self.latest_depth_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+            # Depth is in mm for RealSense, convert to meters
+            if self.latest_depth_image.dtype == np.uint16:
+                self.latest_depth_image = self.latest_depth_image.astype(np.float32) / 1000.0
+        except Exception as e:
+            self.get_logger().error(f'Error converting depth image: {e}')
+    
+    def camera_info_callback(self, msg: CameraInfo):
+        """Store camera intrinsics for deprojection"""
+        if self.camera_intrinsics is None:
+            self.camera_intrinsics = {
+                'fx': msg.k[0],
+                'fy': msg.k[4],
+                'ppx': msg.k[2],
+                'ppy': msg.k[5],
+                'width': msg.width,
+                'height': msg.height
+            }
+            self.get_logger().info(f'Camera intrinsics loaded: {self.camera_intrinsics}')
+    
+    def handle_vlm_grounding(self, msg: String):
+        """
+        Handle VLM grounding results (bbox + target)
+        Convert bbox to 3D coordinates using depth
+        """
+        try:
+            grounding = json.loads(msg.data)
+            target = grounding.get('target', '')
+            bbox = grounding.get('bbox', None)
+            
+            if not bbox or self.latest_depth_image is None or self.camera_intrinsics is None:
+                self.get_logger().warn(
+                    f'Cannot resolve 3D position: bbox={bbox is not None}, '
+                    f'depth={self.latest_depth_image is not None}, '
+                    f'intrinsics={self.camera_intrinsics is not None}'
+                )
+                return
+            
+            # Resolve 3D position from bbox and depth
+            position_3d = self.resolve_3d_position(bbox, self.latest_depth_image, self.camera_intrinsics)
+            
+            if position_3d is not None:
+                self.get_logger().info(
+                    f'Target "{target}" located at 3D position: '
+                    f'[{position_3d[0]:.3f}, {position_3d[1]:.3f}, {position_3d[2]:.3f}] meters'
+                )
+                
+                # Publish 3D target position
+                pose_msg = PoseStamped()
+                pose_msg.header.stamp = self.get_clock().now().to_msg()
+                pose_msg.header.frame_id = 'camera_color_optical_frame'
+                pose_msg.pose.position.x = position_3d[0]
+                pose_msg.pose.position.y = position_3d[1]
+                pose_msg.pose.position.z = position_3d[2]
+                pose_msg.pose.orientation.w = 1.0
+                
+                self.target_position_pub.publish(pose_msg)
+            else:
+                self.get_logger().error(f'Failed to resolve 3D position for {target}')
+                
+        except Exception as e:
+            self.get_logger().error(f'Error handling VLM grounding: {e}')
+    
+    def resolve_3d_position(self, bbox, depth_image, camera_intrinsics):
+        """
+        Convert VLM bounding box to 3D coordinates
+        
+        Args:
+            bbox: [x1, y1, x2, y2] in pixel coordinates
+            depth_image: numpy array with depth in meters
+            camera_intrinsics: dict with fx, fy, ppx, ppy
+        
+        Returns:
+            [x, y, z] in meters in camera frame, or None if invalid
+        """
+        try:
+            # 1. Get bbox centroid
+            x1, y1, x2, y2 = bbox
+            cx = int((x1 + x2) / 2)
+            cy = int((y1 + y2) / 2)
+            
+            # Clamp to image bounds
+            cy = max(0, min(cy, depth_image.shape[0] - 1))
+            cx = max(0, min(cx, depth_image.shape[1] - 1))
+            y1 = max(0, min(int(y1), depth_image.shape[0] - 1))
+            y2 = max(0, min(int(y2), depth_image.shape[0] - 1))
+            x1 = max(0, min(int(x1), depth_image.shape[1] - 1))
+            x2 = max(0, min(int(x2), depth_image.shape[1] - 1))
+            
+            # 2. Look up depth at centroid (with median filter for robustness)
+            roi = depth_image[y1:y2, x1:x2]
+            valid_depths = roi[roi > 0]  # Ignore zero (invalid) depths
+            
+            if len(valid_depths) == 0:
+                self.get_logger().warn('No valid depth values in ROI')
+                return None
+            
+            depth_z = float(np.median(valid_depths))
+            
+            self.get_logger().info(f'Bbox centroid: ({cx}, {cy}), Depth: {depth_z:.3f}m')
+            
+            # 3. Deproject pixel to 3D point using camera intrinsics
+            fx = camera_intrinsics['fx']
+            fy = camera_intrinsics['fy']
+            ppx = camera_intrinsics['ppx']
+            ppy = camera_intrinsics['ppy']
+            
+            x = (cx - ppx) * depth_z / fx
+            y = (cy - ppy) * depth_z / fy
+            z = depth_z
+            
+            # 4. Transform from camera frame to robot base frame (TODO: add TF)
+            # For now, return in camera frame
+            return [x, y, z]
+            
+        except Exception as e:
+            self.get_logger().error(f'Error in 3D position resolution: {e}')
+            return None
     
     def publish_status(self):
         """Publish current status for monitoring."""

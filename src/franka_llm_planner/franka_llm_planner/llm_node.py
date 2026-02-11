@@ -38,18 +38,24 @@ class LLMNode(Node):
         
         # System prompt for robot task planning
         self.system_prompt = """You are a robot task planner for a Franka arm.
-                Convert commands to JSON action plans.
+Extract the action and target object from natural language commands.
 
-                Available actions: pick, place, move, wait, inspect
+Available actions: pick, place, move, locate, inspect
 
-                Respond with JSON only:
-                {
-                "understood": true,
-                "tasks": [
-                    {"action": "pick", "object": "...", "location": "...", "response time": "..."}
-                ]
-                }
-                """
+Examples:
+- "pick up the red cup" → {"understood": true, "tasks": [{"action": "pick", "object": "red cup"}]}
+- "move the apple to the left" → {"understood": true, "tasks": [{"action": "move", "object": "apple", "location": "left"}]}
+- "find the screwdriver" → {"understood": true, "tasks": [{"action": "locate", "object": "screwdriver"}]}
+
+Respond with JSON only. Keep object descriptions exactly as mentioned by the user.
+Format:
+{
+  "understood": true,
+  "tasks": [
+    {"action": "pick|place|move|locate|inspect", "object": "target object name", "location": "optional"}
+  ]
+}
+"""
         
         self.get_logger().info(f'LLM Node started. Model: {self.model}')
         self.get_logger().info('Listening on: /user_command')
@@ -64,6 +70,7 @@ class LLMNode(Node):
                     'model': self.model,
                     'prompt': f"{self.system_prompt}\n\nCommand: {prompt}",
                     'stream': False,
+                    'format': 'json',  # Force JSON output
                     'options': {
                         'temperature': 0.3,
                         'num_predict': 500,

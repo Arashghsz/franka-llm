@@ -72,10 +72,25 @@ class VLMNode(Node):
             10
         )
         
+        # Publish grounding results (bbox + target)
+        self.grounding_pub = self.create_publisher(
+            String,
+            '/vlm_grounding',
+            10
+        )
+        
         # Status publisher for debugging
         self.status_pub = self.create_publisher(
             String,
             '/vlm/status',
+            10
+        )
+        
+        # Subscribe to grounding requests from LLM/coordinator
+        self.grounding_request_sub = self.create_subscription(
+            String,
+            '/vlm_request',
+            self.grounding_request_callback,
             10
         )
         
@@ -198,6 +213,123 @@ class VLMNode(Node):
             status_msg = String()
             status_msg.data = f'ERROR: {str(e)}'
             self.status_pub.publish(status_msg)
+    
+    def grounding_request_callback(self, msg: String):
+        """
+        Handle grounding requests from LLM/coordinator
+        Expected format: JSON with {"target": "red cup", "task": "pick"}
+        """
+        try:
+            request = json.loads(msg.data)
+            target = request.get('target', '')
+            
+            if not target or self.latest_image is None:
+                self.get_logger().warn('Grounding request received but no target or no image available')
+                return
+            
+            self.get_logger().info(f'Grounding request for target: {target}')
+            
+            # Encode current image
+            _, buffer = cv2.imencode('.jpg', self.latest_image)
+            image_base64 = base64.b64encode(buffer).decode('utf-8')
+            
+            # Query VLM for grounding (bbox + rationale)
+            grounding_result = self.query_vlm_for_grounding(image_base64, target)
+            
+            if grounding_result:
+                # Publish grounding result
+                msg = String()
+                msg.data = json.dumps(grounding_result)
+                self.grounding_pub.publish(msg)
+                
+                self.get_logger().info(f'Published grounding: {grounding_result}')
+            else:
+                self.get_logger().error('Grounding failed')
+                
+        except json.JSONDecodeError as e:
+            self.get_logger().error(f'Invalid JSON in grounding request: {e}')
+        except Exception as e:
+            self.get_logger().error(f'Error in grounding request callback: {str(e)}')
+    
+    def query_vlm_for_grounding(self, image_base64: str, target: str) -> dict:
+        """
+        Query VLM to locate target object and return bounding box
+        
+        Returns:
+            {
+                "target": "red cup",
+                "bbox": [x1, y1, x2, y2],  # pixel coordinates
+                "confidence": "high",
+                "rationale": "The red cup is on the left side of the table"
+            }
+        """
+        try:
+            # Prompt VLM to provide bounding box coordinates
+            # Note: LLaVA doesn't natively output structured bboxes, 
+            # so we prompt it to describe location and parse the response
+            # For production, use Florence-2, Qwen-VL, or VILA which have native grounding
+            prompt = (
+                f'I need to locate the "{target}" in this image. '
+                f'Please provide:\n'
+                f'1. A bounding box in the format [x1, y1, x2, y2] where coordinates are in pixels\n'
+                f'2. Your confidence level (high/medium/low)\n'
+                f'3. A brief rationale for why you selected this region\n\n'
+                f'Respond in JSON format:\n'
+                f'{{\n'
+                f'  "bbox": [x1, y1, x2, y2],\n'
+                f'  "confidence": "high",\n'
+                f'  "rationale": "your explanation"\n'
+                f'}}\n\n'
+                f'If you cannot find the object, set bbox to null.'
+            )
+            
+            payload = {
+                'model': self.vlm_model,
+                'prompt': prompt,
+                'images': [image_base64],
+                'stream': False,
+                'temperature': 0.2,  # Low temperature for precise localization
+                'format': 'json',  # Request JSON output
+            }
+            
+            response = requests.post(
+                f'{self.ollama_host}/api/generate',
+                json=payload,
+                timeout=self.timeout
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                vlm_response = result.get('response', '{}')
+                
+                # Parse VLM's JSON response
+                try:
+                    grounding_data = json.loads(vlm_response)
+                    
+                    # Add target name to response
+                    grounding_data['target'] = target
+                    
+                    # Validate bbox format
+                    if grounding_data.get('bbox') and len(grounding_data['bbox']) == 4:
+                        return grounding_data
+                    else:
+                        self.get_logger().warn(f'VLM could not locate {target}')
+                        return None
+                        
+                except json.JSONDecodeError:
+                    self.get_logger().error(f'VLM did not return valid JSON: {vlm_response}')
+                    return None
+            else:
+                self.get_logger().error(f'VLM API error: {response.status_code}')
+                return None
+                
+        except requests.exceptions.Timeout:
+            self.get_logger().error(f'VLM grounding timeout after {self.timeout}s')
+            return None
+        except Exception as e:
+            self.get_logger().error(f'Error in VLM grounding: {str(e)}')
+            return None
+
     
     def query_vlm(self, image_base64: str) -> str:
         """
