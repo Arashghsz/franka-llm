@@ -27,6 +27,8 @@ ros2 run franka_llm_planner llm_node
 cd ~/franka-llm
 source install/setup.zsh
 ros2 run franka_vlm_agent vlm_node
+# Note: Auto-analyze is disabled by default - VLM only processes when requested
+# Uses EE camera compressed images by default for network efficiency
 ```
 
 ### Terminal 4: Coordinator (Depth Resolver)
@@ -86,10 +88,12 @@ python3 src/test_vlm_grounding.py
 
 ## Current State
 
-✅ VLM node accepts grounding requests
+✅ VLM node accepts grounding requests (on-demand only)
 ✅ VLM prompts for bounding boxes (LLaVA text-based)
+✅ VLM uses EE camera compressed images by default
 ✅ Coordinator resolves depth from bbox
 ✅ 3D position published to `/target_position`
+✅ Chatbot mode for scene inspection
 ⚠️ Motion execution not yet connected
 ⚠️ TF camera→robot transform needed
 

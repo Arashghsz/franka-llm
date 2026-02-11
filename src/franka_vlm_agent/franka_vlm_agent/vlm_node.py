@@ -27,11 +27,12 @@ class VLMNode(Node):
         super().__init__('vlm_node')
         
         # Declare parameters
-        self.declare_parameter('camera_topic', '/camera/color/image_raw')
+        self.declare_parameter('camera_topic', '/cameras/ee/ee_camera/color/image_raw')  # EE camera by default
         self.declare_parameter('use_compressed', True)  # Use compressed images by default for network efficiency
         self.declare_parameter('ollama_host', 'http://localhost:11434')
         self.declare_parameter('vlm_model', 'llava:7b')
-        self.declare_parameter('analysis_rate', 1.0)  # Hz
+        self.declare_parameter('auto_analyze', False)  # Disable automatic scene analysis
+        self.declare_parameter('analysis_rate', 1.0)  # Hz (only used if auto_analyze=True)
         self.declare_parameter('timeout', 30)  # seconds
         self.declare_parameter('debug', False)
         
@@ -40,6 +41,7 @@ class VLMNode(Node):
         self.use_compressed = self.get_parameter('use_compressed').value
         self.ollama_host = self.get_parameter('ollama_host').value
         self.vlm_model = self.get_parameter('vlm_model').value
+        self.auto_analyze = self.get_parameter('auto_analyze').value
         self.analysis_rate = self.get_parameter('analysis_rate').value
         self.timeout = self.get_parameter('timeout').value
         self.debug = self.get_parameter('debug').value
@@ -152,11 +154,12 @@ class VLMNode(Node):
             # Store latest image for processing
             self.latest_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
             
-            # Check if enough time has passed since last analysis
-            current_time = time.time()
-            if current_time - self.last_analysis_time >= self.min_interval:
-                self.process_image()
-                self.last_analysis_time = current_time
+            # Only auto-analyze if enabled
+            if self.auto_analyze:
+                current_time = time.time()
+                if current_time - self.last_analysis_time >= self.min_interval:
+                    self.process_image()
+                    self.last_analysis_time = current_time
                 
         except Exception as e:
             self.get_logger().error(f'Error in image callback: {str(e)}')
@@ -168,11 +171,12 @@ class VLMNode(Node):
             np_arr = np.frombuffer(msg.data, np.uint8)
             self.latest_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
             
-            # Check if enough time has passed since last analysis
-            current_time = time.time()
-            if current_time - self.last_analysis_time >= self.min_interval:
-                self.process_image()
-                self.last_analysis_time = current_time
+            # Only auto-analyze if enabled
+            if self.auto_analyze:
+                current_time = time.time()
+                if current_time - self.last_analysis_time >= self.min_interval:
+                    self.process_image()
+                    self.last_analysis_time = current_time
                 
         except Exception as e:
             self.get_logger().error(f'Error in compressed image callback: {str(e)}')
