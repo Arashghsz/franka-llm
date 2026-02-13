@@ -4,7 +4,7 @@
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('Franka LLM Dashboard initializing...');
+    console.log('Franka Multi-Agent Manipulation Dashboard initializing...');
 
     // Initialize ROSBridge connection
     try {

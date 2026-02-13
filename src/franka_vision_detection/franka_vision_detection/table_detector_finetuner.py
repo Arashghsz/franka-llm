@@ -4,7 +4,7 @@ from pathlib import Path
 from ultralytics import YOLO
 
 
-def create_dataset_config(data_dir: str = '/home/arash/franka-llm/datasets/battery_assembly'):
+def create_dataset_config(data_dir: str = '/home/arash/franka-multiagent-manipulation/datasets/battery_assembly'):
     """Create YOLO dataset configuration"""
     
     config = {
@@ -52,7 +52,7 @@ def train_model(data_config: str, model_name: str = 'yolov8x', epochs: int = 100
         batch=16,
         patience=20,
         device=0,  # GPU device
-        project='/home/arash/franka-llm/runs/detect',
+        project='/home/arash/franka-multiagent-manipulation/runs/detect',
         name='battery_assembly',
         plots=True,
         save=True,
@@ -86,7 +86,7 @@ def main(args=None):
     SETUP INSTRUCTIONS:
     
     1. Create dataset directory structure:
-       /home/arash/franka-llm/datasets/battery_assembly/
+       /home/arash/franka-multiagent-manipulation/datasets/battery_assembly/
        ├── images/
        │   ├── train/
        │   ├── val/

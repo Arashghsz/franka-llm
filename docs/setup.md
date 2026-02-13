@@ -11,8 +11,8 @@
 
 ### 1. Clone Repository
 ```bash
-git clone https://github.com/Arashghsz/franka-llm.git
-cd franka-llm
+git clone https://github.com/Arashghsz/franka-multiagent-manipulation.git
+cd franka-multiagent-manipulation
 ```
 
 ### 2. Create Virtual Environment (Optional)

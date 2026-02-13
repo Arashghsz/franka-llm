@@ -1,4 +1,4 @@
-# Franka LLM System Architecture
+# Franka Multi-Agent Manipulation System Architecture
 
 ## Pipeline Overview
 

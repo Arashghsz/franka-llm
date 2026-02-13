@@ -10,21 +10,21 @@ User Command → LLM (parse) → VLM (bbox) → Depth Resolver (3D) → Motion
 
 ### Terminal 1: RealSense Cameras
 ```bash
-cd ~/franka-llm
+cd ~/franka-multiagent-manipulation
 source install/setup.zsh
 ros2 launch realsense_cameras cameras.launch.py
 ```
 
 ### Terminal 2: LLM Task Planner
 ```bash
-cd ~/franka-llm
+cd ~/franka-multiagent-manipulation
 source install/setup.zsh
 ros2 run franka_llm_planner llm_node
 ```
 
 ### Terminal 3: VLM Grounding Agent
 ```bash
-cd ~/franka-llm
+cd ~/franka-multiagent-manipulation
 source install/setup.zsh
 ros2 run franka_vlm_agent vlm_node
 # Note: Auto-analyze is disabled by default - VLM only processes when requested
@@ -33,14 +33,14 @@ ros2 run franka_vlm_agent vlm_node
 
 ### Terminal 4: Coordinator (Depth Resolver)
 ```bash
-cd ~/franka-llm
+cd ~/franka-multiagent-manipulation
 source install/setup.zsh
 ros2 run franka_coordinator coordinator_node
 ```
 
 ### Terminal 5: Interactive Chat
 ```bash
-cd ~/franka-llm
+cd ~/franka-multiagent-manipulation
 source install/setup.zsh
 python3 src/simple_terminal_chat.py
 ```

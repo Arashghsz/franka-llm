@@ -14,7 +14,7 @@ setup(
     zip_safe=True,
     maintainer='arash',
     maintainer_email='ghasemzadehh.arash@gmail.com',
-    description='Coordinator for Franka LLM Pipeline',
+    description='Coordinator for Franka Multi-Agent Manipulation Pipeline',
     license='MIT',
     entry_points={
         'console_scripts': [

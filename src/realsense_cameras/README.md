@@ -1,4 +1,4 @@
-# RealSense Cameras for Franka LLM
+# RealSense Cameras for Franka Multi-Agent Manipulation
 
 Multi-camera streaming package for the Franka robot using RealSense sensors.
 
@@ -24,7 +24,7 @@ sudo apt-get install ros-jazzy-realsense2-camera ros-jazzy-realsense2-camera-msg
 
 ### Build
 ```bash
-cd ~/franka-llm
+cd ~/franka-multiagent-manipulation
 colcon build --packages-select realsense_cameras
 source install/setup.zsh
 ```

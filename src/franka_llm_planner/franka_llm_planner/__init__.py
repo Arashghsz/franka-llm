@@ -1,4 +1,4 @@
-"""Franka LLM Planner Package"""
+"""Franka Multi-Agent Manipulation Planner Package"""
 
 from .moveit import FrankaHelperReal, FrankaManipulation, create_pose
 

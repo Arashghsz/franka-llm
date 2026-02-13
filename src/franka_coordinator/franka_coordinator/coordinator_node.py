@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Coordinator Node - Main orchestrator for the Franka LLM pipeline
+Coordinator Node - Main orchestrator for the Franka Multi-Agent Manipulation pipeline
 Handles:
 - Web requests from the dashboard
 - Routing between LLM, VLM, Vision Detection, and Motion Executor

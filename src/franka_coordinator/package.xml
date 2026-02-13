@@ -2,7 +2,7 @@
 <package format="3">
   <name>franka_coordinator</name>
   <version>0.1.0</version>
-  <description>Coordinator for Franka LLM Pipeline</description>
+  <description>Coordinator for Franka Multi-Agent Manipulation Pipeline</description>
   <maintainer email="ghasemzadehh.arash@gmail.com">arash</maintainer>
   <license>MIT</license>
 

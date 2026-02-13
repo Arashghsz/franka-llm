@@ -1,5 +1,5 @@
 """
-Multi-camera launch file for Franka LLM
+Multi-camera launch file for Franka Multi-Agent Manipulation system
 - Fixed D415 for workspace view
 - D435i at end-effector
 """

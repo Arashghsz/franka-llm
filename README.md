@@ -1,4 +1,4 @@
-# Franka LLM - Active Development Branch
+# Franka Multi-Agent Manipulation - Active Development Branch
 
 This is the **active development branch** where new features and improvements are being implemented.
 

@@ -17,7 +17,7 @@ setup(
     zip_safe=True,
     maintainer='arash',
     maintainer_email='ghasemzadehh.arash@gmail.com',
-    description='RealSense camera integration for Franka LLM planner',
+    description='RealSense camera integration for Franka Multi-Agent Manipulation system',
     license='MIT',
     extras_require={
         'test': [

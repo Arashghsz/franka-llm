@@ -12,7 +12,7 @@ curl -fsSL https://ollama.ai/install.sh | sh
 ollama pull llama3.1:8b
 
 # Build package
-cd /home/arash/franka-llm
+cd /home/arash/franka-multiagent-manipulation
 colcon build --packages-select franka_llm_planner
 source install/setup.zsh  # or setup.bash
 ```

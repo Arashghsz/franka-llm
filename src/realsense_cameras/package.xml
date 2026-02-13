@@ -3,7 +3,7 @@
 <package format="3">
   <name>realsense_cameras</name>
   <version>0.0.0</version>
-  <description>RealSense camera integration for Franka LLM planner (D415 fixed + D435i end-effector)</description>
+  <description>RealSense camera integration for Franka Multi-Agent Manipulation system (D415 fixed + D435i end-effector)</description>
   <maintainer email="ghasemzadehh.arash@gmail.com">arash</maintainer>
   <license>MIT</license>
 

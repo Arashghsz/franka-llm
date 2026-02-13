@@ -1,4 +1,4 @@
-# Franka LLM Web Dashboard
+# Franka Multi-Agent Manipulation Web Dashboard
 
 A modern, ChatGPT-like web interface for controlling your Franka robot with natural language. Integrated with ROS2 backend for real-time task execution and status monitoring.
 
@@ -65,7 +65,7 @@ The dashboard communicates with a dynamic ROS2 backend:
 ### Step 1: Build ROS2 Packages
 
 ```bash
-cd /home/arash/franka-llm
+cd /home/arash/franka-multiagent-manipulation
 
 # Build the coordinator and web handler
 colcon build --packages-select franka_coordinator
@@ -91,7 +91,7 @@ ros2 launch rosbridge_server rosbridge_websocket_launch.xml
 
 ```bash
 # In another terminal
-cd /home/arash/franka-llm
+cd /home/arash/franka-multiagent-manipulation
 source install/setup.bash
 
 # Option A: Run both nodes individually
@@ -109,7 +109,7 @@ ros2 run franka_coordinator web_handler
 
 ```bash
 # In another terminal
-cd /home/arash/franka-llm/ui/web_chat_dashboard
+cd /home/arash/franka-multiagent-manipulation/ui/web_chat_dashboard
 python3 -m http.server 8000
 ```
 
