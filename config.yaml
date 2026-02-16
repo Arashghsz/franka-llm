@@ -1,0 +1,38 @@
+# Franka LLM System Configuration
+# Edit this file to change models and settings across all agents
+
+# LLM Coordinator Settings
+llm:
+  model: "llama3.1:8b"              # Options: llama3.1:8b, llama3.1:70b, mistral, phi3, etc.
+  ollama_url: "http://localhost:11434"
+  temperature: 0.3
+  timeout: 60
+
+# VLM Agent Settings  
+vlm:
+  model: "llava:7b"                  # Options: llava:7b, llava:13b, llava:34b, bakllava, etc.
+  ollama_url: "http://localhost:11434"
+  temperature: 0.3
+  timeout: 30
+  auto_analyze: false
+  analysis_rate: 1.0
+
+# Camera Settings
+camera:
+  topic: "/cameras/ee/ee_camera/color/image_raw"
+  use_compressed: true
+  depth_topic: "/cameras/ee/ee_camera/aligned_depth_to_color/image_raw"
+  camera_info_topic: "/cameras/ee/ee_camera/color/camera_info"
+
+# Motion Executor Settings (future)
+motion:
+  planning_time: 5.0
+  max_velocity_scaling: 0.3
+  max_acceleration_scaling: 0.3
+
+# Debug Settings
+debug:
+  vlm_debug: false
+  llm_debug: false
+  save_images: false
+  log_level: "INFO"               # Options: DEBUG, INFO, WARN, ERROR

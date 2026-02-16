@@ -13,7 +13,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', glob('launch/*.py')),
     ],
-    install_requires=['setuptools', 'requests'],
+    install_requires=['setuptools', 'requests', 'pyyaml'],
     zip_safe=True,
     maintainer='arash',
     maintainer_email='ghasemzadehh.arash@gmail.com',

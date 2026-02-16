@@ -19,6 +19,7 @@ import base64
 import json
 import time
 from pathlib import Path
+import yaml
 
 
 class VLMNode(Node):
@@ -27,25 +28,22 @@ class VLMNode(Node):
     def __init__(self):
         super().__init__('vlm_node')
         
-        # Declare parameters
-        self.declare_parameter('camera_topic', '/cameras/ee/ee_camera/color/image_raw')  # EE camera by default
-        self.declare_parameter('use_compressed', True)  # Use compressed images by default for network efficiency
-        self.declare_parameter('ollama_host', 'http://localhost:11434')
-        self.declare_parameter('vlm_model', 'llava:7b')
-        self.declare_parameter('auto_analyze', False)  # Disable automatic scene analysis
-        self.declare_parameter('analysis_rate', 1.0)  # Hz (only used if auto_analyze=True)
-        self.declare_parameter('timeout', 30)  # seconds
-        self.declare_parameter('debug', False)
+        # Load configuration from config.yaml
+        config_path = Path(__file__).parents[4] / 'config.yaml'
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
         
-        # Get parameters
-        self.camera_topic = self.get_parameter('camera_topic').value
-        self.use_compressed = self.get_parameter('use_compressed').value
-        self.ollama_host = self.get_parameter('ollama_host').value
-        self.vlm_model = self.get_parameter('vlm_model').value
-        self.auto_analyze = self.get_parameter('auto_analyze').value
-        self.analysis_rate = self.get_parameter('analysis_rate').value
-        self.timeout = self.get_parameter('timeout').value
-        self.debug = self.get_parameter('debug').value
+        # VLM settings from config file
+        self.vlm_model = config['vlm']['model']
+        self.ollama_host = config['vlm']['ollama_url']
+        self.timeout = config['vlm']['timeout']
+        self.auto_analyze = config['vlm']['auto_analyze']
+        self.analysis_rate = config['vlm']['analysis_rate']
+        self.debug = config['debug']['vlm_debug']
+        
+        # Camera settings from config file
+        self.camera_topic = config['camera']['topic']
+        self.use_compressed = config['camera']['use_compressed']
         
         # Initialize CV Bridge
         self.bridge = CvBridge()

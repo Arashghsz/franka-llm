@@ -22,6 +22,8 @@ from geometry_msgs.msg import PoseStamped
 import requests
 import json
 from datetime import datetime
+import yaml
+from pathlib import Path
 
 
 class LLMCoordinator(Node):
@@ -29,12 +31,16 @@ class LLMCoordinator(Node):
     def __init__(self):
         super().__init__('llm_coordinator')
         
-        # Parameters
-        self.declare_parameter('model', 'llama3.1:8b')
-        self.declare_parameter('ollama_url', 'http://localhost:11434')
+        # Load configuration from config.yaml
+        config_path = Path(__file__).parents[4] / 'config.yaml'
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
         
-        self.model = self.get_parameter('model').value
-        self.ollama_url = self.get_parameter('ollama_url').value
+        # LLM settings from config file
+        self.model = config['llm']['model']
+        self.ollama_url = config['llm']['ollama_url']
+        self.temperature = config['llm']['temperature']
+        self.timeout = config['llm']['timeout']
         
         # Publishers for different agents
         self.vlm_request_pub = self.create_publisher(String, '/vlm_request', 10)
@@ -133,11 +139,11 @@ Examples:
                     'stream': False,
                     'format': 'json',
                     'options': {
-                        'temperature': 0.3,
+                        'temperature': self.temperature,
                         'num_predict': 500,
                     }
                 },
-                timeout=60
+                timeout=self.timeout
             )
             
             if response.status_code == 200:
