@@ -10,19 +10,19 @@ llm:
 
 # VLM Agent Settings  
 vlm:
-  model: "llava:7b"                  # Options: llava:7b, llava:13b, llava:34b, bakllava, etc.
+  model: "llava:7b"                # Multimodal model for visual grounding
   ollama_url: "http://localhost:11434"
   temperature: 0.3
-  timeout: 30
+  timeout: 90                         # Large models need more time, especially on first load
   auto_analyze: false
   analysis_rate: 1.0
 
-# Camera Settings
+# Camera Settings (RealSense on end-effector)
 camera:
-  topic: "/cameras/ee/ee_camera/color/image_raw"
-  use_compressed: true
+  color_topic: "/cameras/ee/ee_camera/color/image_raw"
   depth_topic: "/cameras/ee/ee_camera/aligned_depth_to_color/image_raw"
   camera_info_topic: "/cameras/ee/ee_camera/color/camera_info"
+  use_compressed: true
 
 # Motion Executor Settings (future)
 motion:

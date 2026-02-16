@@ -17,6 +17,7 @@ Publishes to:
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from std_msgs.msg import String
 from geometry_msgs.msg import PoseStamped
 import requests
@@ -32,7 +33,9 @@ class LLMCoordinator(Node):
         super().__init__('llm_coordinator')
         
         # Load configuration from config.yaml
-        config_path = Path(__file__).parents[4] / 'config.yaml'
+        config_path = self._find_config_file()
+        self.get_logger().info(f'Loading config from: {config_path}')
+        
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
         
@@ -41,6 +44,13 @@ class LLMCoordinator(Node):
         self.ollama_url = config['llm']['ollama_url']
         self.temperature = config['llm']['temperature']
         self.timeout = config['llm']['timeout']
+        
+        # QoS profile for subscriptions
+        qos_profile = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1
+        )
         
         # Publishers for different agents
         self.vlm_request_pub = self.create_publisher(String, '/vlm_request', 10)
@@ -59,14 +69,14 @@ class LLMCoordinator(Node):
             String,
             '/vlm/explanation',
             self.vlm_response_callback,
-            10
+            qos_profile
         )
         
         self.vlm_position_sub = self.create_subscription(
             PoseStamped,
             '/vlm_center_position',
             self.vlm_position_callback,
-            10
+            qos_profile
         )
         
         self.motion_status_sub = self.create_subscription(
@@ -127,6 +137,28 @@ Examples:
         self.get_logger().info(f'LLM Coordinator started. Model: {self.model}')
         self.get_logger().info('This node routes commands to VLM or Motion agents')
         self.get_logger().info('Listening on: /user_command')
+    
+    def _find_config_file(self) -> Path:
+        """Find config.yaml in workspace"""
+        current_path = Path(__file__).resolve()
+        
+        # Try walking up the directory tree
+        for parent in [current_path] + list(current_path.parents):
+            candidate = parent / 'config.yaml'
+            if candidate.exists():
+                return candidate
+        
+        # Fallback locations
+        fallbacks = [
+            Path.cwd() / 'config.yaml',
+            Path('/home/arash/franka-llm/config.yaml'),
+        ]
+        
+        for candidate in fallbacks:
+            if candidate.exists():
+                return candidate
+        
+        raise FileNotFoundError('Could not find config.yaml')
     
     def query_llm(self, prompt: str) -> dict:
         """Send query to Ollama API for routing decision."""
