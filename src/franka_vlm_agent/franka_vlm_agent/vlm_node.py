@@ -40,10 +40,17 @@ class VLMNode(Node):
         self.auto_analyze = config['vlm']['auto_analyze']
         self.analysis_rate = config['vlm']['analysis_rate']
         self.debug = config['debug']['vlm_debug']
+        self.save_images = config['debug']['save_images']
         
         # Camera settings from config file
         self.camera_topic = config['camera']['topic']
         self.use_compressed = config['camera']['use_compressed']
+        
+        # Create debug images directory if saving is enabled
+        if self.save_images:
+            self.debug_dir = Path(__file__).parents[4] / 'debug_images'
+            self.debug_dir.mkdir(exist_ok=True)
+            self.get_logger().info(f'Saving debug images to: {self.debug_dir}')
         
         # Initialize CV Bridge
         self.bridge = CvBridge()
@@ -322,6 +329,16 @@ class VLMNode(Node):
                             f'Object "{target_object}" located at pixel ({cx}, {cy}), '
                             f'3D position: X={x:.3f}, Y={y:.3f}, Z={z:.3f}'
                         )
+                        
+                        # Save annotated image for debugging
+                        if self.save_images:
+                            self.save_debug_image(
+                                self.latest_image.copy(), 
+                                target_object, 
+                                cx, cy, 
+                                depth_z,
+                                result.get('confidence', 'unknown')
+                            )
                     else:
                         self.get_logger().warn(f'Invalid depth at object center: {depth_z}')
                 else:
@@ -335,6 +352,82 @@ class VLMNode(Node):
                 
         except Exception as e:
             self.get_logger().error(f'Error in object localization: {str(e)}')
+    
+    def save_debug_image(self, image, object_name, cx, cy, depth, confidence):
+        """
+        Save annotated debug image with detection markers
+        
+        Args:
+            image: Original image (BGR format)
+            object_name: Name of detected object
+            cx, cy: Center pixel coordinates
+            depth: Depth value in meters
+            confidence: Confidence level from VLM
+        """
+        try:
+            # Create annotated image
+            debug_img = image.copy()
+            
+            # Draw crosshair at center point (green)
+            crosshair_size = 20
+            thickness = 2
+            color = (0, 255, 0)  # Green in BGR
+            
+            # Horizontal line
+            cv2.line(debug_img, 
+                    (cx - crosshair_size, cy), 
+                    (cx + crosshair_size, cy), 
+                    color, thickness)
+            # Vertical line
+            cv2.line(debug_img, 
+                    (cx, cy - crosshair_size), 
+                    (cx, cy + crosshair_size), 
+                    color, thickness)
+            
+            # Draw circle at center
+            cv2.circle(debug_img, (cx, cy), 5, color, -1)
+            
+            # Add text annotations
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.6
+            text_thickness = 2
+            text_color = (0, 255, 0)  # Green
+            bg_color = (0, 0, 0)  # Black background for text
+            
+            # Object name
+            text = f"Object: {object_name}"
+            (text_width, text_height), _ = cv2.getTextSize(text, font, font_scale, text_thickness)
+            cv2.rectangle(debug_img, (10, 10), (10 + text_width + 10, 10 + text_height + 10), bg_color, -1)
+            cv2.putText(debug_img, text, (15, 10 + text_height), font, font_scale, text_color, text_thickness)
+            
+            # Center coordinates
+            text = f"Center: ({cx}, {cy})"
+            (text_width, text_height), _ = cv2.getTextSize(text, font, font_scale, text_thickness)
+            cv2.rectangle(debug_img, (10, 40), (10 + text_width + 10, 40 + text_height + 10), bg_color, -1)
+            cv2.putText(debug_img, text, (15, 40 + text_height), font, font_scale, text_color, text_thickness)
+            
+            # Depth
+            text = f"Depth: {depth:.3f}m"
+            (text_width, text_height), _ = cv2.getTextSize(text, font, font_scale, text_thickness)
+            cv2.rectangle(debug_img, (10, 70), (10 + text_width + 10, 70 + text_height + 10), bg_color, -1)
+            cv2.putText(debug_img, text, (15, 70 + text_height), font, font_scale, text_color, text_thickness)
+            
+            # Confidence
+            text = f"Confidence: {confidence}"
+            (text_width, text_height), _ = cv2.getTextSize(text, font, font_scale, text_thickness)
+            cv2.rectangle(debug_img, (10, 100), (10 + text_width + 10, 100 + text_height + 10), bg_color, -1)
+            cv2.putText(debug_img, text, (15, 100 + text_height), font, font_scale, text_color, text_thickness)
+            
+            # Save with timestamp
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = f"detect_{object_name.replace(' ', '_')}_{timestamp}.jpg"
+            filepath = self.debug_dir / filename
+            
+            cv2.imwrite(str(filepath), debug_img)
+            self.get_logger().info(f'Saved debug image: {filename}')
+            
+        except Exception as e:
+            self.get_logger().error(f'Error saving debug image: {e}')
     
     def grounding_request_callback(self, msg: String):
         """

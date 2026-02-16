@@ -1,5 +1,28 @@
 # Quick Start: VLM Scene Analysis Pipeline
 
+## Configuration
+
+All models and settings are configured in **`config.yaml`** at the repo root. Edit this file to change:
+
+- **LLM Model**: `llm.model` (default: `llama3.1:8b`)
+  - Options: `llama3.1:8b`, `llama3.1:70b`, `llama3.2:3b`, `mistral`, `phi3`, etc.
+- **VLM Model**: `vlm.model` (default: `llava:7b`)
+  - Options: `llava:7b`, `llava:13b`, `llava:34b`, `bakllava`, `llava-phi3`, etc.
+- **Ollama URLs**: `llm.ollama_url` and `vlm.ollama_url` (default: `http://localhost:11434`)
+- **Timeouts**: `llm.timeout` (60s) and `vlm.timeout` (30s)
+- **Camera Topics**: `camera.topic`, `camera.depth_topic`, etc.
+- **Debug Options**: `debug.vlm_debug`, `debug.llm_debug`, `debug.log_level`
+
+**Example - Switching to Llama 3.2 and LLaVA 13B:**
+```yaml
+llm:
+  model: "llama3.2:3b"
+vlm:
+  model: "llava:13b"
+```
+
+No rebuild needed - just restart the nodes!
+
 ## Architecture Flow
 
 ```
@@ -173,7 +196,52 @@ ros2 topic echo /vlm_center_position
 ## Next Steps
 
 1. **Test the new architecture** - Run test_depth_center_pixel.py first
-2. **Motion integration** - Connect motion planner to use VLM position
-3. **TF transforms** - Add camera→robot frame transformation
-4. **Better VLM models** - Try Qwen-VL or Florence-2 for improved scene understanding
-5. **Multi-point sampling** - Extend beyond center pixel if needed
+2. **Change models** - Edit `config.yaml` to try different LLM/VLM models
+   - Pull new models: `ollama pull llama3.2:3b` or `ollama pull llava:13b`
+3. **Motion integration** - Connect motion planner to use VLM position
+4. **TF transforms** - Add camera→robot frame transformation
+5. **Better VLM models** - Try Qwen-VL or Florence-2 for improved scene understanding
+6. **Multi-point sampling** - Extend beyond center pixel if needed
+
+## Configuration Reference
+
+### Available LLM Models (via Ollama)
+- `llama3.1:8b` - Default, good balance (4.7 GB)
+- `llama3.2:3b` - Faster, smaller (2 GB)
+- `llama3.1:70b` - Best quality, slow (40 GB)
+- `mistral:7b` - Alternative, fast (4.1 GB)
+- `phi3:mini` - Very small, fast (2.3 GB)
+
+### Available VLM Models (via Ollama)
+- `llava:7b` - Default (4.7 GB)
+- `llava:13b` - Better quality (8 GB)
+- `llava:34b` - Best quality, slow (20 GB)
+- `bakllava` - LLaVA variant (4.7 GB)
+- `llava-phi3` - Smaller, faster (2.9 GB)
+
+### Camera Configuration
+```yaml
+camera:
+  topic: "/cameras/ee/ee_camera/color/image_raw"
+  use_compressed: true                    # Use compressed images over network
+  depth_topic: "/cameras/ee/ee_camera/aligned_depth_to_color/image_raw"
+  camera_info_topic: "/cameras/ee/ee_camera/color/camera_info"
+```
+
+### Debug Options
+```yaml
+debug:
+  vlm_debug: false      # Enable verbose VLM logging
+  llm_debug: false      # Enable verbose LLM logging
+  save_images: true     # Save annotated images to debug_images/ folder
+  log_level: "INFO"     # DEBUG, INFO, WARN, ERROR
+```
+
+**Image Debugging:**
+When `save_images: true`, the VLM saves annotated images to `debug_images/` showing:
+- Green crosshair marking the detected object center
+- Object name, pixel coordinates, depth, and confidence
+- Filename format: `detect_<object>_<timestamp>.jpg`
+- Example: `detect_red_cup_20260216_143052.jpg`
+
+This helps debug object localization issues visually!

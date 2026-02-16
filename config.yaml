@@ -34,5 +34,5 @@ motion:
 debug:
   vlm_debug: false
   llm_debug: false
-  save_images: false
-  log_level: "INFO"               # Options: DEBUG, INFO, WARN, ERROR
+  save_images: true                   # Save annotated images to debug_images/ folder
+  log_level: "INFO"                   # Options: DEBUG, INFO, WARN, ERROR
