@@ -261,6 +261,83 @@ class VLMNode(Node):
             status_msg.data = f'ERROR: {str(e)}'
             self.status_pub.publish(status_msg)
     
+    def process_object_localization(self, target_object: str):
+        """
+        Locate specific object and get its center pixel with depth
+        
+        Args:
+            target_object: Name of the object to locate (e.g., "red cup")
+        """
+        if self.latest_image is None:
+            return
+        
+        try:
+            # Encode image to base64
+            _, buffer = cv2.imencode('.jpg', self.latest_image)
+            image_base64 = base64.b64encode(buffer).decode('utf-8')
+            
+            # Query VLM to locate object and get its center
+            self.get_logger().info(f'Locating "{target_object}" and finding its center...')
+            result = self.query_vlm_for_object_center(image_base64, target_object)
+            
+            if result and result.get('center'):
+                center_x, center_y = result['center']
+                
+                # Get depth at object center
+                if self.latest_depth_image is not None:
+                    height, width = self.latest_depth_image.shape
+                    
+                    # Clamp to image bounds
+                    cx = max(0, min(int(center_x), width - 1))
+                    cy = max(0, min(int(center_y), height - 1))
+                    
+                    depth_z = float(self.latest_depth_image[cy, cx])
+                    
+                    if depth_z > 0 and self.camera_intrinsics:
+                        # Deproject to 3D
+                        fx = self.camera_intrinsics['fx']
+                        fy = self.camera_intrinsics['fy']
+                        ppx = self.camera_intrinsics['ppx']
+                        ppy = self.camera_intrinsics['ppy']
+                        
+                        x = (cx - ppx) * depth_z / fx
+                        y = (cy - ppy) * depth_z / fy
+                        z = depth_z
+                        
+                        # Publish 3D position
+                        pose_msg = PoseStamped()
+                        pose_msg.header.stamp = self.get_clock().now().to_msg()
+                        pose_msg.header.frame_id = 'ee_d435i_color_optical_frame'
+                        pose_msg.pose.position.x = x
+                        pose_msg.pose.position.y = y
+                        pose_msg.pose.position.z = z
+                        pose_msg.pose.orientation.w = 1.0
+                        
+                        self.position_pub.publish(pose_msg)
+                        
+                        # Publish description
+                        desc_msg = String()
+                        desc_msg.data = result.get('description', f'Located {target_object}')
+                        self.analysis_pub.publish(desc_msg)
+                        
+                        self.get_logger().info(
+                            f'Object "{target_object}" located at pixel ({cx}, {cy}), '
+                            f'3D position: X={x:.3f}, Y={y:.3f}, Z={z:.3f}'
+                        )
+                    else:
+                        self.get_logger().warn(f'Invalid depth at object center: {depth_z}')
+                else:
+                    self.get_logger().warn('Depth image not available')
+            else:
+                self.get_logger().error(f'Could not locate {target_object}')
+                # Publish failure message
+                desc_msg = String()
+                desc_msg.data = f'I cannot see {target_object} in the current view.'
+                self.analysis_pub.publish(desc_msg)
+                
+        except Exception as e:
+            self.get_logger().error(f'Error in object localization: {str(e)}')
+    
     def grounding_request_callback(self, msg: String):
         """
         Handle analysis requests from LLM coordinator
