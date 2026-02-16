@@ -22,6 +22,7 @@ setup(
     entry_points={
         'console_scripts': [
             'llm_node = franka_llm_planner.llm_node:main',
+            'llm_coordinator = franka_llm_planner.llm_coordinator_node:main',
         ],
     },
 )

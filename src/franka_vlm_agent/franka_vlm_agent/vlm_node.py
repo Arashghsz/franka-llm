@@ -8,8 +8,9 @@ Publishes explanation of table contents to /vlm/explanation
 
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Image, CompressedImage
+from sensor_msgs.msg import Image, CompressedImage, CameraInfo
 from std_msgs.msg import String
+from geometry_msgs.msg import PoseStamped
 import cv2
 import numpy as np
 from cv_bridge import CvBridge
@@ -49,6 +50,10 @@ class VLMNode(Node):
         # Initialize CV Bridge
         self.bridge = CvBridge()
         
+        # Depth resolution data
+        self.latest_depth_image = None
+        self.camera_intrinsics = None
+        
         # Subscribe to camera (compressed or raw)
         if self.use_compressed:
             # Subscribe to compressed images (better for network transmission)
@@ -74,13 +79,6 @@ class VLMNode(Node):
             10
         )
         
-        # Publish grounding results (bbox + target)
-        self.grounding_pub = self.create_publisher(
-            String,
-            '/vlm_grounding',
-            10
-        )
-        
         # Status publisher for debugging
         self.status_pub = self.create_publisher(
             String,
@@ -93,6 +91,29 @@ class VLMNode(Node):
             String,
             '/vlm_request',
             self.grounding_request_callback,
+            10
+        )
+        
+        # Subscribe to depth image for 3D position resolution
+        self.depth_sub = self.create_subscription(
+            Image,
+            '/cameras/ee/ee_camera/aligned_depth_to_color/image_raw',
+            self.depth_callback,
+            10
+        )
+        
+        # Subscribe to camera info for intrinsics
+        self.camera_info_sub = self.create_subscription(
+            CameraInfo,
+            '/cameras/ee/ee_camera/color/camera_info',
+            self.camera_info_callback,
+            10
+        )
+        
+        # Publisher for 3D position (center of scene)
+        self.position_pub = self.create_publisher(
+            PoseStamped,
+            '/vlm_center_position',
             10
         )
         
@@ -196,12 +217,34 @@ class VLMNode(Node):
             explanation = self.query_vlm(image_base64)
             
             if explanation:
+                # Get 3D position of center pixel
+                center_3d = self.get_center_pixel_3d_position()
+                
                 # Publish explanation
                 msg = String()
                 msg.data = explanation
                 self.analysis_pub.publish(msg)
                 
                 self.get_logger().info(f'Published explanation: {explanation[:80]}...')
+                
+                # Publish 3D position if available
+                if center_3d:
+                    pose_msg = PoseStamped()
+                    pose_msg.header.stamp = self.get_clock().now().to_msg()
+                    pose_msg.header.frame_id = 'ee_d435i_color_optical_frame'
+                    pose_msg.pose.position.x = center_3d['position'][0]
+                    pose_msg.pose.position.y = center_3d['position'][1]
+                    pose_msg.pose.position.z = center_3d['position'][2]
+                    pose_msg.pose.orientation.w = 1.0
+                    
+                    self.position_pub.publish(pose_msg)
+                    
+                    self.get_logger().info(
+                        f'Center pixel 3D position: '
+                        f'X={center_3d["position"][0]:.3f}, '
+                        f'Y={center_3d["position"][1]:.3f}, '
+                        f'Z={center_3d["position"][2]:.3f}'
+                    )
                 
                 # Publish status
                 status_msg = String()
@@ -220,86 +263,125 @@ class VLMNode(Node):
     
     def grounding_request_callback(self, msg: String):
         """
-        Handle grounding requests from LLM/coordinator
+        Handle analysis requests from LLM coordinator
         Expected format: 
-        - Grounding: {"target": "red cup", "task": "pick"}
-        - Scene description: {"type": "scene_description", "query": "table"}
+        - Scene description: {"type": "scene_description"}
+        - Locate object: {"type": "locate", "object": "red cup"}
         """
         try:
             request = json.loads(msg.data)
+            request_type = request.get('type', 'scene_description')
+            target_object = request.get('object', None)
             
-            # Check if this is a scene description request
-            if request.get('type') == 'scene_description':
-                if self.latest_image is None:
-                    self.get_logger().warn('Scene description requested but no image available')
-                    return
-                
-                self.get_logger().info('Scene description requested')
-                # Process image for scene description
-                self.process_image()
+            if self.latest_image is None:
+                self.get_logger().warn('Analysis requested but no image available')
                 return
             
-            # Otherwise, it's a grounding request
-            target = request.get('target', '')
+            self.get_logger().info(f'{request_type.upper()} requested')
             
-            if not target or self.latest_image is None:
-                self.get_logger().warn('Grounding request received but no target or no image available')
-                return
-            
-            self.get_logger().info(f'Grounding request for target: {target}')
-            
-            # Encode current image
-            _, buffer = cv2.imencode('.jpg', self.latest_image)
-            image_base64 = base64.b64encode(buffer).decode('utf-8')
-            
-            # Query VLM for grounding (bbox + rationale)
-            grounding_result = self.query_vlm_for_grounding(image_base64, target)
-            
-            if grounding_result:
-                # Publish grounding result
-                msg = String()
-                msg.data = json.dumps(grounding_result)
-                self.grounding_pub.publish(msg)
-                
-                self.get_logger().info(f'Published grounding: {grounding_result}')
+            if request_type == 'locate' and target_object:
+                # Find specific object and get its center
+                self.process_object_localization(target_object)
             else:
-                self.get_logger().error('Grounding failed')
-                
+                # General scene description with image center depth
+                self.process_image()
+            
         except json.JSONDecodeError as e:
-            self.get_logger().error(f'Invalid JSON in grounding request: {e}')
+            self.get_logger().error(f'Invalid JSON in request: {e}')
         except Exception as e:
-            self.get_logger().error(f'Error in grounding request callback: {str(e)}')
+            self.get_logger().error(f'Error in request callback: {str(e)}')
     
-    def query_vlm_for_grounding(self, image_base64: str, target: str) -> dict:
+    def depth_callback(self, msg: Image):
+        """Store latest depth image for 3D position resolution"""
+        try:
+            self.latest_depth_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+            # Convert from mm to meters if needed
+            if self.latest_depth_image.dtype == np.uint16:
+                self.latest_depth_image = self.latest_depth_image.astype(np.float32) / 1000.0
+        except Exception as e:
+            self.get_logger().error(f'Error converting depth image: {e}')
+    
+    def camera_info_callback(self, msg: CameraInfo):
+        """Store camera intrinsics for deprojection"""
+        if self.camera_intrinsics is None:
+            self.camera_intrinsics = {
+                'fx': msg.k[0],
+                'fy': msg.k[4],
+                'ppx': msg.k[2],
+                'ppy': msg.k[5],
+                'width': msg.width,
+                'height': msg.height
+            }
+            self.get_logger().info(f'Camera intrinsics loaded: {self.camera_intrinsics}')
+    
+    def get_center_pixel_3d_position(self) -> dict:
         """
-        Query VLM to locate target object and return bounding box
+        Get 3D position of center pixel from depth camera
         
         Returns:
+            dict with 'position' [x, y, z] in meters, or None if unavailable
+        """
+        if self.latest_depth_image is None or self.camera_intrinsics is None:
+            return None
+        
+        try:
+            height, width = self.latest_depth_image.shape
+            center_x = width // 2
+            center_y = height // 2
+            
+            # Get depth at center pixel
+            depth_z = float(self.latest_depth_image[center_y, center_x])
+            
+            if depth_z <= 0:
+                self.get_logger().warn(f'Invalid depth at center pixel: {depth_z}')
+                return None
+            
+            # Deproject to 3D
+            fx = self.camera_intrinsics['fx']
+            fy = self.camera_intrinsics['fy']
+            ppx = self.camera_intrinsics['ppx']
+            ppy = self.camera_intrinsics['ppy']
+            
+            x = (center_x - ppx) * depth_z / fx
+            y = (center_y - ppy) * depth_z / fy
+            z = depth_z
+            
+            return {
+                'position': [x, y, z],
+                'pixel': [center_x, center_y],
+                'depth': depth_z
+            }
+        except Exception as e:
+            self.get_logger().error(f'Error getting center pixel 3D position: {e}')
+            return None
+    
+    def query_vlm_for_object_center(self, image_base64: str, target_object: str) -> dict:
+        """
+        Query VLM to locate object and return its center pixel
+        
+        Args:
+            image_base64: Base64 encoded image
+            target_object: Name of object to locate (e.g., "red cup")
+            
+        Returns:
             {
-                "target": "red cup",
-                "bbox": [x1, y1, x2, y2],  # pixel coordinates
-                "confidence": "high",
-                "rationale": "The red cup is on the left side of the table"
+                "center": [x, y],  # pixel coordinates of object center
+                "description": "The red cup is on the left side",
+                "confidence": "high"
             }
         """
         try:
-            # Prompt VLM to provide bounding box coordinates
-            # Note: LLaVA doesn't natively output structured bboxes, 
-            # so we prompt it to describe location and parse the response
-            # For production, use Florence-2, Qwen-VL, or VILA which have native grounding
             prompt = (
-                f'I need to locate the "{target}" in this image. '
-                f'Please provide:\n'
-                f'1. A bounding box in the format [x1, y1, x2, y2] where coordinates are in pixels\n'
-                f'2. Your confidence level (high/medium/low)\n'
-                f'3. A brief rationale for why you selected this region\n\n'
+                f'I need to locate the "{target_object}" in this image. '
+                f'Please identify where it is and provide the CENTER PIXEL coordinates.\n\n'
                 f'Respond in JSON format:\n'
                 f'{{\n'
-                f'  "bbox": [x1, y1, x2, y2],\n'
-                f'  "confidence": "high",\n'
-                f'  "rationale": "your explanation"\n'
+                f'  "center": [x, y],\n'
+                f'  "description": "brief description of where the object is",\n'
+                f'  "confidence": "high|medium|low"\n'
                 f'}}\n\n'
-                f'If you cannot find the object, set bbox to null.'
+                f'The center should be the approximate pixel coordinates at the middle of the object.\n'
+                f'If you cannot find the object, set center to null.'
             )
             
             payload = {
@@ -307,8 +389,8 @@ class VLMNode(Node):
                 'prompt': prompt,
                 'images': [image_base64],
                 'stream': False,
-                'temperature': 0.2,  # Low temperature for precise localization
-                'format': 'json',  # Request JSON output
+                'temperature': 0.3,
+                'format': 'json',
             }
             
             response = requests.post(
@@ -321,34 +403,26 @@ class VLMNode(Node):
                 result = response.json()
                 vlm_response = result.get('response', '{}')
                 
-                # Parse VLM's JSON response
                 try:
-                    grounding_data = json.loads(vlm_response)
-                    
-                    # Add target name to response
-                    grounding_data['target'] = target
-                    
-                    # Validate bbox format
-                    if grounding_data.get('bbox') and len(grounding_data['bbox']) == 4:
-                        return grounding_data
+                    data = json.loads(vlm_response)
+                    if data.get('center') and len(data['center']) == 2:
+                        return data
                     else:
-                        self.get_logger().warn(f'VLM could not locate {target}')
+                        self.get_logger().warn(f'VLM could not locate {target_object}')
                         return None
-                        
                 except json.JSONDecodeError:
-                    self.get_logger().error(f'VLM did not return valid JSON: {vlm_response}')
+                    self.get_logger().error(f'VLM returned invalid JSON: {vlm_response}')
                     return None
             else:
                 self.get_logger().error(f'VLM API error: {response.status_code}')
                 return None
                 
         except requests.exceptions.Timeout:
-            self.get_logger().error(f'VLM grounding timeout after {self.timeout}s')
+            self.get_logger().error(f'VLM timeout after {self.timeout}s')
             return None
         except Exception as e:
-            self.get_logger().error(f'Error in VLM grounding: {str(e)}')
+            self.get_logger().error(f'Error querying VLM for object center: {str(e)}')
             return None
-
     
     def query_vlm(self, image_base64: str) -> str:
         """
