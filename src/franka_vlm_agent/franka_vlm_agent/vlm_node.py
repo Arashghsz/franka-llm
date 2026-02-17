@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 VLM Node - Jetson AGX Orin
-Subscribes to camera images and uses VLM for scene analysis and object localization
+Subscribes to camera images ON-DEMAND for VLM scene analysis and object localization.
+Images are only captured when explicitly requested to minimize system load.
 """
 
 import rclpy
@@ -14,6 +15,7 @@ import cv2
 import numpy as np
 from cv_bridge import CvBridge
 import json
+import time
 from pathlib import Path
 import yaml
 
@@ -46,7 +48,9 @@ class VLMNode(Node):
         
         # Image storage
         self.latest_image = None
-        self.image_count = 0
+        self.latest_depth = None
+        self.pending_image_request = False
+        self.image_subscribers_active = False
         
         # Setup ROS interfaces
         self._setup_subscribers()
@@ -141,31 +145,20 @@ class VLMNode(Node):
         raise FileNotFoundError('Could not find config.yaml')
     
     def _setup_subscribers(self):
-        """Setup ROS subscribers"""
-        # QoS for large compressed images
-        image_qos = QoSProfile(
+        """Setup ROS subscribers - only for requests initially"""
+        # QoS for large compressed images (will be used when we subscribe on-demand)
+        self.image_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
             history=QoSHistoryPolicy.KEEP_LAST,
             depth=1
         )
         
-        # Image subscription
-        if self.use_compressed:
-            self.image_sub = self.create_subscription(
-                CompressedImage,
-                self.camera_topic + '/compressed',
-                self._compressed_image_callback,
-                image_qos
-            )
-        else:
-            self.image_sub = self.create_subscription(
-                Image,
-                self.camera_topic,
-                self._image_callback,
-                image_qos
-            )
+        # Store subscription references (will be None until needed)
+        self.image_sub = None
+        self.depth_sub = None
+        self.camera_info_sub = None
         
-        # VLM request subscription (small messages, can use default QoS)
+        # VLM request subscription (always active to receive requests)
         self.request_sub = self.create_subscription(
             String,
             '/vlm_request',
@@ -173,12 +166,42 @@ class VLMNode(Node):
             10
         )
         
-        # Depth subscription (large messages - use BEST_EFFORT QoS)
+        self.get_logger().info('Image subscriptions will be created on-demand (when VLM requests are made)')
+    
+    def _setup_publishers(self):
+        """Setup ROS publishers"""
+        self.explanation_pub = self.create_publisher(String, '/vlm/explanation', 10)
+        self.position_pub = self.create_publisher(PoseStamped, '/vlm_center_position', 10)
+    
+    def _subscribe_to_images(self):
+        """Subscribe to camera topics on-demand"""
+        if self.image_subscribers_active:
+            return
+        
+        self.get_logger().info('Subscribing to camera topics...')
+        
+        # Image subscription
+        if self.use_compressed:
+            self.image_sub = self.create_subscription(
+                CompressedImage,
+                self.camera_topic + '/compressed',
+                self._compressed_image_callback,
+                self.image_qos
+            )
+        else:
+            self.image_sub = self.create_subscription(
+                Image,
+                self.camera_topic,
+                self._image_callback,
+                self.image_qos
+            )
+        
+        # Depth subscription
         self.depth_sub = self.create_subscription(
             Image,
             self.depth_topic,
             self._depth_callback,
-            image_qos
+            self.image_qos
         )
         
         # Camera info subscription
@@ -186,39 +209,60 @@ class VLMNode(Node):
             CameraInfo,
             self.camera_info_topic,
             self._camera_info_callback,
-            image_qos
+            self.image_qos
         )
+        
+        self.image_subscribers_active = True
     
-    def _setup_publishers(self):
-        """Setup ROS publishers"""
-        self.explanation_pub = self.create_publisher(String, '/vlm/explanation', 10)
-        self.position_pub = self.create_publisher(PoseStamped, '/vlm_center_position', 10)
+    def _unsubscribe_from_images(self):
+        """Unsubscribe from camera topics to save resources"""
+        if not self.image_subscribers_active:
+            return
+        
+        self.get_logger().info('Unsubscribing from camera topics...')
+        
+        if self.image_sub:
+            self.destroy_subscription(self.image_sub)
+            self.image_sub = None
+        
+        if self.depth_sub:
+            self.destroy_subscription(self.depth_sub)
+            self.depth_sub = None
+        
+        if self.camera_info_sub:
+            self.destroy_subscription(self.camera_info_sub)
+            self.camera_info_sub = None
+        
+        self.image_subscribers_active = False
     
     def _image_callback(self, msg: Image):
-        """Handle raw image messages"""
+        """Handle raw image messages - only when actively needed"""
+        if not self.pending_image_request:
+            return
+        
         try:
             self.latest_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-            self.image_count += 1
-            
-            if self.image_count <= 3 or self.image_count % 30 == 0:
-                self.get_logger().info(f'Received image #{self.image_count}')
+            self.get_logger().debug('Captured image for VLM request')
         except Exception as e:
             self.get_logger().error(f'Error in image callback: {e}')
     
     def _compressed_image_callback(self, msg: CompressedImage):
-        """Handle compressed image messages"""
+        """Handle compressed image messages - only when actively needed"""
+        if not self.pending_image_request:
+            return
+        
         try:
             np_arr = np.frombuffer(msg.data, np.uint8)
             self.latest_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-            self.image_count += 1
-            
-            if self.image_count <= 3 or self.image_count % 30 == 0:
-                self.get_logger().info(f'Received image #{self.image_count}')
+            self.get_logger().debug('Captured compressed image for VLM request')
         except Exception as e:
             self.get_logger().error(f'Error in compressed image callback: {e}')
     
     def _depth_callback(self, msg: Image):
-        """Handle depth image messages"""
+        """Handle depth image messages - only when actively needed"""
+        if not self.pending_image_request:
+            return
+        
         try:
             depth_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
             
@@ -226,7 +270,9 @@ class VLMNode(Node):
             if depth_image.dtype == np.uint16:
                 depth_image = depth_image.astype(np.float32) / 1000.0
             
+            self.latest_depth = depth_image
             self.depth_processor.update_depth_image(depth_image)
+            self.get_logger().debug('Captured depth image for VLM request')
         except Exception as e:
             self.get_logger().error(f'Error in depth callback: {e}')
     
@@ -249,11 +295,36 @@ class VLMNode(Node):
         """
         self.get_logger().info(f'[VLM REQUEST] Received: {msg.data[:100]}')
         
-        if self.latest_image is None:
-            self.get_logger().warn('Request received but no image available')
-            return
-        
         try:
+            # Subscribe to camera topics if not already subscribed
+            self._subscribe_to_images()
+            
+            # Enable image capture
+            self.pending_image_request = True
+            self.latest_image = None
+            self.latest_depth = None
+            
+            # Wait for fresh images to arrive (camera typically runs at 30Hz, so 0.2s should capture 6 frames)
+            max_wait_time = 0.5  # 500ms should be enough
+            wait_interval = 0.05  # Check every 50ms
+            elapsed = 0
+            
+            while self.latest_image is None and elapsed < max_wait_time:
+                time.sleep(wait_interval)
+                elapsed += wait_interval
+            
+            # Disable image capture
+            self.pending_image_request = False
+            
+            # Unsubscribe to save resources
+            self._unsubscribe_from_images()
+            
+            if self.latest_image is None:
+                self.get_logger().warn('No image received within timeout period')
+                return
+            
+            self.get_logger().info(f'Captured fresh image for processing')
+            
             # Parse request
             request_type, target_object = self._parse_request(msg.data)
             
@@ -265,6 +336,8 @@ class VLMNode(Node):
                 self._handle_describe_request()
         except Exception as e:
             self.get_logger().error(f'Error handling request: {e}')
+            self.pending_image_request = False
+            self._unsubscribe_from_images()
     
     def _parse_request(self, request_str: str) -> tuple:
         """Parse request string into (type, object_name)"""
