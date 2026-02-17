@@ -85,19 +85,54 @@ class OllamaVLMClient:
         """
         self._log(f'Querying VLM to locate: {target_object}', 'debug')
         
+        # Try natural language approach - don't force JSON format
         prompt = (
-            f'Locate the "{target_object}" in this image. '
-            f'Provide the CENTER PIXEL coordinates.\n\n'
-            f'Respond in JSON format:\n'
-            f'{{\n'
-            f'  "center": [x, y],\n'
-            f'  "description": "brief location description",\n'
-            f'  "confidence": "high|medium|low"\n'
-            f'}}\n\n'
-            f'If you cannot find it, set center to null.'
+            f'In this image, I need to find the "{target_object}".\n'
+            f'If you can see it, tell me:\n'
+            f'1. Where is it located in the image? (describe position)\n'
+            f'2. What are the approximate pixel coordinates of its center? The image is 1280x720 pixels.\n'
+            f'Format your answer as: FOUND at pixel (x, y) - description\n'
+            f'If you cannot find it, say: NOT FOUND'
         )
         
-        return self._query(prompt, image_base64, format_json=True)
+        # Query without JSON format
+        result = self._query(prompt, image_base64, format_json=False)
+        
+        if result and 'response' in result:
+            response_text = result['response']
+            self._log(f'Raw VLM response: {response_text}', 'info')
+            
+            # Try to parse coordinates from natural language
+            import re
+            
+            # Look for patterns like "pixel (x, y)" or "coordinates x, y" or "[x, y]"
+            patterns = [
+                r'pixel\s*\((\d+),\s*(\d+)\)',
+                r'coordinates?\s*\(?(\d+),\s*(\d+)\)?',
+                r'\[(\d+),\s*(\d+)\]',
+                r'at\s*\((\d+),\s*(\d+)\)',
+                r'center.*?(\d+).*?(\d+)',
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, response_text, re.IGNORECASE)
+                if match:
+                    x, y = int(match.group(1)), int(match.group(2))
+                    return {
+                        'center': [x, y],
+                        'description': response_text[:100],
+                        'confidence': 'high' if 'FOUND' in response_text.upper() else 'medium'
+                    }
+            
+            # If no coordinates found but object is mentioned
+            if target_object.lower() in response_text.lower() and 'not found' not in response_text.lower():
+                return {
+                    'center': None,
+                    'description': response_text,
+                    'confidence': 'low'
+                }
+        
+        return None
     
     def describe_scene(self, image_base64: str) -> Optional[str]:
         """

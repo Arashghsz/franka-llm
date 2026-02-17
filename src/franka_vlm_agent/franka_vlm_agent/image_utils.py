@@ -25,14 +25,17 @@ def encode_image_to_base64(image: np.ndarray) -> str:
     return base64.b64encode(buffer).decode('utf-8')
 
 
-def draw_center_marker(image: np.ndarray, center: list, color=(0, 255, 0), size=20, thickness=3) -> np.ndarray:
+def draw_center_marker(image: np.ndarray, center: list, object_name: str = None, 
+                      depth: float = None, color=(0, 255, 255), size=50, thickness=4) -> np.ndarray:
     """
-    Draw a crosshair marker at the center point
+    Draw a HIGHLY VISIBLE crosshair marker at the center point
     
     Args:
         image: OpenCV image
         center: [x, y] pixel coordinates
-        color: BGR color tuple (default: green)
+        object_name: Optional name of the detected object
+        depth: Optional depth value at center in meters
+        color: BGR color tuple (default: bright cyan/yellow)
         size: Size of the crosshair in pixels
         thickness: Line thickness
         
@@ -42,22 +45,59 @@ def draw_center_marker(image: np.ndarray, center: list, color=(0, 255, 0), size=
     img_marked = image.copy()
     x, y = int(center[0]), int(center[1])
     
-    # Draw crosshair
-    cv2.line(img_marked, (x - size, y), (x + size, y), color, thickness)
-    cv2.line(img_marked, (x, y - size), (x, y + size), color, thickness)
+    # Use bright cyan for maximum visibility
+    main_color = (0, 255, 255)  # Cyan - visible on most backgrounds
+    outline_color = (255, 0, 255)  # Magenta outline for extra contrast
     
-    # Draw circle around center
-    cv2.circle(img_marked, (x, y), size // 2, color, thickness)
+    # Draw thick magenta outline first
+    outline_size = size + 5
+    cv2.line(img_marked, (x - outline_size, y), (x + outline_size, y), outline_color, thickness + 4)
+    cv2.line(img_marked, (x, y - outline_size), (x, y + outline_size), outline_color, thickness + 4)
+    cv2.circle(img_marked, (x, y), size, outline_color, thickness + 4)
     
-    # Add text label
-    cv2.putText(img_marked, f'({x}, {y})', (x + size + 5, y - size), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+    # Draw main cyan crosshair on top
+    cv2.line(img_marked, (x - size, y), (x + size, y), main_color, thickness)
+    cv2.line(img_marked, (x, y - size), (x, y + size), main_color, thickness)
+    
+    # Draw circles - outer ring and filled center
+    cv2.circle(img_marked, (x, y), size // 2, main_color, thickness)
+    cv2.circle(img_marked, (x, y), 8, (0, 0, 255), -1)  # Red filled center dot
+    cv2.circle(img_marked, (x, y), 8, (255, 255, 255), 2)  # White outline on center dot
+    
+    # Add info text with high-contrast background
+    info_lines = [f'>>> PIXEL: ({x}, {y})']
+    if object_name:
+        info_lines.insert(0, f'>>> OBJECT: {object_name}')
+    if depth is not None:
+        info_lines.append(f'>>> DEPTH: {depth:.3f}m')
+    
+    # Draw text with thick background for maximum visibility
+    font = cv2.FONT_HERSHEY_DUPLEX
+    font_scale = 0.8
+    text_thickness = 2
+    y_offset = max(50, y - size - 15)  # Make sure text is visible
+    
+    for i, line in enumerate(info_lines):
+        text_y = y_offset + (i * 35)
+        # Get text size for background
+        (text_width, text_height), _ = cv2.getTextSize(line, font, font_scale, text_thickness)
+        # Draw thick black background with white border
+        bg_x1 = x + size + 15
+        bg_y1 = text_y - text_height - 8
+        bg_x2 = bg_x1 + text_width + 16
+        bg_y2 = text_y + 8
+        # White border
+        cv2.rectangle(img_marked, (bg_x1 - 3, bg_y1 - 3), (bg_x2 + 3, bg_y2 + 3), (255, 255, 255), -1)
+        # Black background
+        cv2.rectangle(img_marked, (bg_x1, bg_y1), (bg_x2, bg_y2), (0, 0, 0), -1)
+        # Cyan text
+        cv2.putText(img_marked, line, (bg_x1 + 8, text_y), font, font_scale, main_color, text_thickness)
     
     return img_marked
 
 
 def save_debug_image(image: np.ndarray, object_name: str, center: list = None, 
-                     debug_dir: Path = None) -> str:
+                     depth: float = None, debug_dir: Path = None) -> str:
     """
     Save image with optional marker to debug directory
     
@@ -65,6 +105,7 @@ def save_debug_image(image: np.ndarray, object_name: str, center: list = None,
         image: OpenCV image
         object_name: Name of the object (used in filename)
         center: Optional [x, y] coordinates to mark
+        depth: Optional depth value at center in meters
         debug_dir: Directory to save images (default: workspace_root/debug_images)
         
     Returns:
@@ -81,7 +122,7 @@ def save_debug_image(image: np.ndarray, object_name: str, center: list = None,
     
     # Create annotated image
     if center is not None:
-        img_to_save = draw_center_marker(image, center)
+        img_to_save = draw_center_marker(image, center, object_name=object_name, depth=depth)
     else:
         img_to_save = image.copy()
     

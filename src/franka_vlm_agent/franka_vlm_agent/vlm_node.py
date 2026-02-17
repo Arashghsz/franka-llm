@@ -275,6 +275,10 @@ class VLMNode(Node):
                     f'  Description: {description}'
                 )
                 
+                # Get 3D position first (need depth for debug image)
+                position_3d = self.depth_processor.get_3d_position(center[0], center[1])
+                depth_value = position_3d['position'][2] if position_3d else None
+                
                 # Save debug image with marker
                 if self.save_images and self.debug_dir:
                     try:
@@ -282,14 +286,12 @@ class VLMNode(Node):
                             self.latest_image,
                             target_object,
                             center=center,
+                            depth=depth_value,
                             debug_dir=self.debug_dir
                         )
                         self.get_logger().info(f'✓ Saved debug image: {Path(saved_path).name}')
                     except Exception as e:
                         self.get_logger().error(f'Failed to save debug image: {e}')
-                
-                # Get 3D position
-                position_3d = self.depth_processor.get_3d_position(center[0], center[1])
                 
                 if position_3d:
                     pos = position_3d['position']

@@ -3,16 +3,16 @@
 
 # LLM Coordinator Settings
 llm:
-  model: "llama3.1:8b"              # Options: llama3.1:8b, llama3.1:70b, mistral, phi3, etc.
+  model: "llama3.1:8b"              # Available models: llama3.1:8b
   ollama_url: "http://localhost:11434"
   temperature: 0.3
   timeout: 60
 
 # VLM Agent Settings  
 vlm:
-  model: "llava:7b"                # Multimodal model for visual grounding
+  model: "gemma3:27b"                # Available models: llava:7b, gemma3:27b
   ollama_url: "http://localhost:11434"
-  temperature: 0.3
+  temperature: 0.9
   timeout: 90                         # Large models need more time, especially on first load
 
 # Debug Settings
