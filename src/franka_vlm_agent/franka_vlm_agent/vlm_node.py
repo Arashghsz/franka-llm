@@ -287,7 +287,8 @@ class VLMNode(Node):
                             target_object,
                             center=center,
                             depth=depth_value,
-                            debug_dir=self.debug_dir
+                            debug_dir=self.debug_dir,
+                            model_name=self.vlm_model
                         )
                         self.get_logger().info(f'✓ Saved debug image: {Path(saved_path).name}')
                     except Exception as e:
@@ -330,7 +331,8 @@ class VLMNode(Node):
                     saved_path = save_debug_image(
                         self.latest_image,
                         'scene_description',
-                        debug_dir=self.debug_dir
+                        debug_dir=self.debug_dir,
+                        model_name=self.vlm_model
                     )
                     self.get_logger().info(f'✓ Saved debug image: {Path(saved_path).name}')
                 except Exception as e:

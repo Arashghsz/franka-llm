@@ -10,10 +10,10 @@ llm:
 
 # VLM Agent Settings  
 vlm:
-  model: "gemma3:27b"                # Available models: llava:7b, gemma3:27b
+  model: "qwen2.5vl:32b"       # Mid-size Qwen vision model - balance of accuracy and stability
   ollama_url: "http://localhost:11434"
-  temperature: 0.9
-  timeout: 90                         # Large models need more time, especially on first load
+  temperature: 0.0                    # Lower = more consistent/deterministic
+  timeout: 120                        # Larger timeout for first load
 
 # Debug Settings
 debug:

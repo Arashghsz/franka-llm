@@ -97,7 +97,7 @@ def draw_center_marker(image: np.ndarray, center: list, object_name: str = None,
 
 
 def save_debug_image(image: np.ndarray, object_name: str, center: list = None, 
-                     depth: float = None, debug_dir: Path = None) -> str:
+                     depth: float = None, debug_dir: Path = None, model_name: str = None) -> str:
     """
     Save image with optional marker to debug directory
     
@@ -107,6 +107,7 @@ def save_debug_image(image: np.ndarray, object_name: str, center: list = None,
         center: Optional [x, y] coordinates to mark
         depth: Optional depth value at center in meters
         debug_dir: Directory to save images (default: workspace_root/debug_images)
+        model_name: Optional model name to include in filename
         
     Returns:
         Path to saved image
@@ -126,10 +127,18 @@ def save_debug_image(image: np.ndarray, object_name: str, center: list = None,
     else:
         img_to_save = image.copy()
     
-    # Generate filename with timestamp
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    # Generate filename with timestamp and model name
+    timestamp = datetime.now().strftime('%b%d_%H-%M-%S')  # e.g., Feb17_18-30-45
     safe_object_name = object_name.replace(' ', '_')
-    filename = f'{safe_object_name}_{timestamp}.jpg'
+    
+    if model_name:
+        # Keep full model name including size (e.g., llama3.2-vision:90b)
+        # Replace : with - for filesystem compatibility
+        model_safe = model_name.replace(':', '-')
+        filename = f'{safe_object_name}_{model_safe}_{timestamp}.jpg'
+    else:
+        filename = f'{safe_object_name}_{timestamp}.jpg'
+    
     filepath = debug_dir / filename
     
     # Save image
