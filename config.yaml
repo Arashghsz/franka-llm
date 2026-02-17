@@ -14,25 +14,7 @@ vlm:
   ollama_url: "http://localhost:11434"
   temperature: 0.3
   timeout: 90                         # Large models need more time, especially on first load
-  auto_analyze: false
-  analysis_rate: 1.0
-
-# Camera Settings (RealSense on end-effector)
-camera:
-  color_topic: "/cameras/ee/ee_camera/color/image_raw"
-  depth_topic: "/cameras/ee/ee_camera/aligned_depth_to_color/image_raw"
-  camera_info_topic: "/cameras/ee/ee_camera/color/camera_info"
-  use_compressed: true
-
-# Motion Executor Settings (future)
-motion:
-  planning_time: 5.0
-  max_velocity_scaling: 0.3
-  max_acceleration_scaling: 0.3
 
 # Debug Settings
 debug:
-  vlm_debug: false
-  llm_debug: false
   save_images: true                   # Save annotated images to debug_images/ folder
-  log_level: "INFO"                   # Options: DEBUG, INFO, WARN, ERROR

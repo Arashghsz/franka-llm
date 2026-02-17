@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-VLM Node - Jetson AGX Orin
-Subscribes to camera images ON-DEMAND for VLM scene analysis and object localization.
-Images are only captured when explicitly requested to minimize system load.
+VLM Node - Simplified Version
+Permanently subscribes to camera and processes VLM requests as they arrive.
 """
 
 import rclpy
@@ -15,7 +14,6 @@ import cv2
 import numpy as np
 from cv_bridge import CvBridge
 import json
-import time
 from pathlib import Path
 import yaml
 
@@ -26,7 +24,7 @@ from .depth_utils import DepthProcessor
 
 
 class VLMNode(Node):
-    """VLM Node for semantic understanding of table scene"""
+    """Simplified VLM Node - always subscribed to camera"""
 
     def __init__(self):
         super().__init__('vlm_node')
@@ -41,16 +39,27 @@ class VLMNode(Node):
             model=self.vlm_model,
             timeout=self.timeout,
             temperature=self.temperature,
-            debug=self.debug,
             logger=self.get_logger()
         )
         self.depth_processor = DepthProcessor()
         
-        # Image storage
+        # Image storage (always keep latest)
         self.latest_image = None
         self.latest_depth = None
-        self.pending_image_request = False
-        self.image_subscribers_active = False
+        
+        # Camera topics (hardcoded, simple)
+        self.camera_topic = "/cameras/ee/ee_camera/color/image_raw"
+        self.depth_topic = "/cameras/ee/ee_camera/aligned_depth_to_color/image_raw"
+        self.camera_info_topic = "/cameras/ee/ee_camera/color/camera_info"
+        self.use_compressed = True
+        
+        # Setup debug directory - save to workspace root
+        if self.save_images:
+            self.debug_dir = Path('/home/arash/franka-llm/debug_images')
+            self.debug_dir.mkdir(exist_ok=True, parents=True)
+            self.get_logger().info(f'Debug images will be saved to: {self.debug_dir}')
+        else:
+            self.debug_dir = None
         
         # Setup ROS interfaces
         self._setup_subscribers()
@@ -69,96 +78,40 @@ class VLMNode(Node):
             f'  Ollama URL: {self.ollama_host}\n'
             f'  Temperature: {self.temperature}\n'
             f'  Timeout: {self.timeout}s\n'
+            f'  Save images: {self.save_images}\n'
             f'  Color topic: {self.camera_topic}\n'
             f'  Depth topic: {self.depth_topic}\n'
-            f'  Camera info: {self.camera_info_topic}\n'
-            f'  Use compressed: {self.use_compressed}\n'
-            f'  Debug mode: {self.debug}\n'
-            f'  Save images: {self.save_images}'
+            f'  Use compressed: {self.use_compressed}'
         )
-    
-    def _check_ollama_health(self):
-        """Check if Ollama is running and model is available"""
-        is_healthy, message = self.vlm_client.check_health()
-        
-        if is_healthy:
-            self.get_logger().info(f'✓ Ollama health check passed: {message}')
-        else:
-            self.get_logger().warn(f'⚠ Ollama health check: {message}')
-            self.get_logger().warn(f'  To install model: ollama pull {self.model}')
-            self.get_logger().warn(f'  To list models: ollama list')
     
     def _load_config(self):
         """Load configuration from config.yaml"""
-        config_path = self._find_config_file()
+        config_path = Path('/home/arash/franka-llm/config.yaml')
         
         self.get_logger().info(f'Loading config from: {config_path}')
         
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
         
-        # VLM settings - all from config
+        # VLM settings
         self.vlm_model = config['vlm']['model']
         self.ollama_host = config['vlm']['ollama_url']
         self.timeout = config['vlm']['timeout']
         self.temperature = config['vlm'].get('temperature', 0.3)
         
         # Debug settings
-        self.debug = config['debug']['vlm_debug']
         self.save_images = config['debug']['save_images']
-        
-        # Camera settings - all from config
-        self.camera_topic = config['camera']['color_topic']
-        self.depth_topic = config['camera']['depth_topic']
-        self.camera_info_topic = config['camera']['camera_info_topic']
-        self.use_compressed = config['camera']['use_compressed']
-        
-        # Debug directory setup
-        if self.save_images:
-            workspace_root = Path(__file__).resolve().parents[4]
-            self.debug_dir = workspace_root / 'debug_images'
-            self.debug_dir.mkdir(exist_ok=True, parents=True)
-            self.get_logger().info(f'Debug images will be saved to: {self.debug_dir}')
-        else:
-            self.debug_dir = None
-    
-    def _find_config_file(self) -> Path:
-        """Find config.yaml in workspace"""
-        current_path = Path(__file__).resolve()
-        
-        # Try walking up the directory tree
-        for parent in [current_path] + list(current_path.parents):
-            candidate = parent / 'config.yaml'
-            if candidate.exists():
-                return candidate
-        
-        # Fallback locations
-        fallbacks = [
-            Path.cwd() / 'config.yaml',
-            Path('/home/arash/franka-llm/config.yaml'),
-        ]
-        
-        for candidate in fallbacks:
-            if candidate.exists():
-                return candidate
-        
-        raise FileNotFoundError('Could not find config.yaml')
     
     def _setup_subscribers(self):
-        """Setup ROS subscribers - only for requests initially"""
-        # QoS for large compressed images (will be used when we subscribe on-demand)
-        self.image_qos = QoSProfile(
+        """Setup ROS subscribers - permanently subscribed"""
+        # QoS for images
+        image_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
             history=QoSHistoryPolicy.KEEP_LAST,
             depth=1
         )
         
-        # Store subscription references (will be None until needed)
-        self.image_sub = None
-        self.depth_sub = None
-        self.camera_info_sub = None
-        
-        # VLM request subscription (always active to receive requests)
+        # VLM request subscription
         self.request_sub = self.create_subscription(
             String,
             '/vlm_request',
@@ -166,34 +119,20 @@ class VLMNode(Node):
             10
         )
         
-        self.get_logger().info('Image subscriptions will be created on-demand (when VLM requests are made)')
-    
-    def _setup_publishers(self):
-        """Setup ROS publishers"""
-        self.explanation_pub = self.create_publisher(String, '/vlm/explanation', 10)
-        self.position_pub = self.create_publisher(PoseStamped, '/vlm_center_position', 10)
-    
-    def _subscribe_to_images(self):
-        """Subscribe to camera topics on-demand"""
-        if self.image_subscribers_active:
-            return
-        
-        self.get_logger().info('Subscribing to camera topics...')
-        
-        # Image subscription
+        # Image subscription (compressed or raw)
         if self.use_compressed:
             self.image_sub = self.create_subscription(
                 CompressedImage,
                 self.camera_topic + '/compressed',
                 self._compressed_image_callback,
-                self.image_qos
+                image_qos
             )
         else:
             self.image_sub = self.create_subscription(
                 Image,
                 self.camera_topic,
                 self._image_callback,
-                self.image_qos
+                image_qos
             )
         
         # Depth subscription
@@ -201,7 +140,7 @@ class VLMNode(Node):
             Image,
             self.depth_topic,
             self._depth_callback,
-            self.image_qos
+            image_qos
         )
         
         # Camera info subscription
@@ -209,60 +148,33 @@ class VLMNode(Node):
             CameraInfo,
             self.camera_info_topic,
             self._camera_info_callback,
-            self.image_qos
+            image_qos
         )
         
-        self.image_subscribers_active = True
+        self.get_logger().info('Subscribed to camera topics (permanently)')
     
-    def _unsubscribe_from_images(self):
-        """Unsubscribe from camera topics to save resources"""
-        if not self.image_subscribers_active:
-            return
-        
-        self.get_logger().info('Unsubscribing from camera topics...')
-        
-        if self.image_sub:
-            self.destroy_subscription(self.image_sub)
-            self.image_sub = None
-        
-        if self.depth_sub:
-            self.destroy_subscription(self.depth_sub)
-            self.depth_sub = None
-        
-        if self.camera_info_sub:
-            self.destroy_subscription(self.camera_info_sub)
-            self.camera_info_sub = None
-        
-        self.image_subscribers_active = False
+    def _setup_publishers(self):
+        """Setup ROS publishers"""
+        self.explanation_pub = self.create_publisher(String, '/vlm/explanation', 10)
+        self.position_pub = self.create_publisher(PoseStamped, '/vlm_center_position', 10)
     
     def _image_callback(self, msg: Image):
-        """Handle raw image messages - only when actively needed"""
-        if not self.pending_image_request:
-            return
-        
+        """Handle raw image messages"""
         try:
             self.latest_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-            self.get_logger().debug('Captured image for VLM request')
         except Exception as e:
             self.get_logger().error(f'Error in image callback: {e}')
     
     def _compressed_image_callback(self, msg: CompressedImage):
-        """Handle compressed image messages - only when actively needed"""
-        if not self.pending_image_request:
-            return
-        
+        """Handle compressed image messages"""
         try:
             np_arr = np.frombuffer(msg.data, np.uint8)
             self.latest_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-            self.get_logger().debug('Captured compressed image for VLM request')
         except Exception as e:
             self.get_logger().error(f'Error in compressed image callback: {e}')
     
     def _depth_callback(self, msg: Image):
-        """Handle depth image messages - only when actively needed"""
-        if not self.pending_image_request:
-            return
-        
+        """Handle depth image messages"""
         try:
             depth_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
             
@@ -272,7 +184,6 @@ class VLMNode(Node):
             
             self.latest_depth = depth_image
             self.depth_processor.update_depth_image(depth_image)
-            self.get_logger().debug('Captured depth image for VLM request')
         except Exception as e:
             self.get_logger().error(f'Error in depth callback: {e}')
     
@@ -291,53 +202,30 @@ class VLMNode(Node):
     def _request_callback(self, msg: String):
         """
         Handle VLM requests
-        Format: "DESCRIBE" or "LOCATE object_name" or JSON
+        Format: JSON with "type" (describe/locate) and optional "object"
         """
-        self.get_logger().info(f'[VLM REQUEST] Received: {msg.data[:100]}')
+        self.get_logger().info(f'[VLM REQUEST] {msg.data}')
+        
+        # Check if we have an image
+        if self.latest_image is None:
+            self.get_logger().warn('No image available yet')
+            return
         
         try:
-            # Subscribe to camera topics if not already subscribed
-            self._subscribe_to_images()
-            
-            # Enable image capture
-            self.pending_image_request = True
-            self.latest_image = None
-            self.latest_depth = None
-            
-            # Wait for fresh images to arrive (camera typically runs at 30Hz, so 0.2s should capture 6 frames)
-            max_wait_time = 0.5  # 500ms should be enough
-            wait_interval = 0.05  # Check every 50ms
-            elapsed = 0
-            
-            while self.latest_image is None and elapsed < max_wait_time:
-                time.sleep(wait_interval)
-                elapsed += wait_interval
-            
-            # Disable image capture
-            self.pending_image_request = False
-            
-            # Unsubscribe to save resources
-            self._unsubscribe_from_images()
-            
-            if self.latest_image is None:
-                self.get_logger().warn('No image received within timeout period')
-                return
-            
-            self.get_logger().info(f'Captured fresh image for processing')
-            
             # Parse request
             request_type, target_object = self._parse_request(msg.data)
             
-            self.get_logger().info(f'Parsed: type={request_type}, object={target_object}')
+            self.get_logger().info(f'Processing: type={request_type}, object={target_object}')
             
-            if request_type == 'locate':
+            if request_type == 'locate' and target_object:
                 self._handle_locate_request(target_object)
-            elif request_type == 'describe':
+            else:
                 self._handle_describe_request()
+                
         except Exception as e:
             self.get_logger().error(f'Error handling request: {e}')
-            self.pending_image_request = False
-            self._unsubscribe_from_images()
+            import traceback
+            self.get_logger().error(traceback.format_exc())
     
     def _parse_request(self, request_str: str) -> tuple:
         """Parse request string into (type, object_name)"""
@@ -382,13 +270,13 @@ class VLMNode(Node):
                 description = parsed.get('description', '')
                 
                 self.get_logger().info(
-                    f'✓ Located "{target_object}" at pixel {center}\\n'
-                    f'  Confidence: {confidence}\\n'
+                    f'✓ Located "{target_object}" at pixel {center}\n'
+                    f'  Confidence: {confidence}\n'
                     f'  Description: {description}'
                 )
                 
                 # Save debug image with marker
-                if self.save_images:
+                if self.save_images and self.debug_dir:
                     try:
                         saved_path = save_debug_image(
                             self.latest_image,
@@ -396,7 +284,7 @@ class VLMNode(Node):
                             center=center,
                             debug_dir=self.debug_dir
                         )
-                        self.get_logger().info(f'✓ Saved debug image: {saved_path}')
+                        self.get_logger().info(f'✓ Saved debug image: {Path(saved_path).name}')
                     except Exception as e:
                         self.get_logger().error(f'Failed to save debug image: {e}')
                 
@@ -431,18 +319,18 @@ class VLMNode(Node):
         description = self.vlm_client.describe_scene(image_base64)
         
         if description:
-            self.get_logger().info(f'✓ Scene description:\\n{description}')
+            self.get_logger().info(f'✓ Scene description:\n{description}')
             self._publish_explanation(description)
             
             # Save image without marker
-            if self.save_images:
+            if self.save_images and self.debug_dir:
                 try:
                     saved_path = save_debug_image(
                         self.latest_image,
                         'scene_description',
                         debug_dir=self.debug_dir
                     )
-                    self.get_logger().info(f'✓ Saved debug image: {saved_path}')
+                    self.get_logger().info(f'✓ Saved debug image: {Path(saved_path).name}')
                 except Exception as e:
                     self.get_logger().error(f'Failed to save debug image: {e}')
         else:

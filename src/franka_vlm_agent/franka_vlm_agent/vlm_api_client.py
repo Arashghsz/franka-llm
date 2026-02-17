@@ -12,7 +12,7 @@ from typing import Optional, Dict
 class OllamaVLMClient:
     """Client for Ollama Vision-Language Model API"""
     
-    def __init__(self, host: str, model: str, timeout: int = 30, temperature: float = 0.3, debug: bool = False, logger=None):
+    def __init__(self, host: str, model: str, timeout: int = 30, temperature: float = 0.3, logger=None):
         """
         Initialize Ollama VLM client
         
@@ -21,22 +21,18 @@ class OllamaVLMClient:
             model: Model name (e.g., "llava:7b", "gemma3:27b")
             timeout: Request timeout in seconds
             temperature: Sampling temperature (0.0-1.0)
-            debug: Enable debug logging
-            logger: ROS logger instance for debug output
+            logger: ROS logger instance for logging
         """
         self.host = host
         self.model = model
         self.timeout = timeout
         self.temperature = temperature
-        self.debug = debug
         self.logger = logger
     
     def _log(self, message: str, level: str = 'info'):
         """Log message if logger is available"""
         if self.logger:
-            if level == 'debug' and self.debug:
-                self.logger.debug(message)
-            elif level == 'info':
+            if level == 'info':
                 self.logger.info(message)
             elif level == 'warn':
                 self.logger.warn(message)
