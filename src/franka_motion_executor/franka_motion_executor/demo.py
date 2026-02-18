@@ -45,34 +45,17 @@ print("new cashed code")
 
 
 # manip.move_to_joints(new_home, velocity_scaling=0.8)
-manip.move_home()
-time.sleep(1)
-manip.open_gripper(width=0.00)
-
-# Move to position - defaults handle gripper-down orientation
-manip.move_to_position(0.6, 0, 0.6, velocity_scaling=0.1)
-time.sleep(1)
-manip.open_gripper(width=0.08)
-manip.move_to_position(0.6, 0, 0.14, velocity_scaling=0.1)
-manip.open_gripper(width=0.03)
-manip.move_home()
-
-# manip.move_to_pose()
-# time.sleep(1)
-# time.sleep(2)
-# manip.move_to_joints(start_point, velocity_scaling=0.8)
-# time.sleep(1)
-# manip.open_gripper(width=0.08)
-# time.sleep(1)
-# time.sleep(2) # time.sleep(2) # manip.move_to_joints(start_point, velocity_scaling=0.5) # time.sleep(2) # manip.open_gripper(width=0.08) # time.sleep(2)
-# # manip.move_home()
-# # time.sleep(1)
-# manip.move_to_joints(destination_point, velocity_scaling=0.1)
-# time.sleep(1)
-# manip.open_gripper(width=0.08)
-# time.sleep(1)
 # manip.move_home()
+# time.sleep(1)
+# manip.open_gripper(width=0.00)
 
+# # Move to position - defaults handle gripper-down orientation
+manip.move_to_position(0.3, 0, 0.6, velocity_scaling=0.1)
+# time.sleep(1)
+# manip.open_gripper(width=0.08)
+# manip.move_to_position(0.6, 0, 0.14, velocity_scaling=0.1)
+# manip.open_gripper(width=0.03)
+# manip.move_home()
 
 # current_joints = helper.get_current_joints()
 # print(f"Current joints: {current_joints}")
