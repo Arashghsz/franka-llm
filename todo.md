@@ -5,7 +5,7 @@
 
 ---
 
-## High-Level System Architecture (LLM → VLM → YOLO → Motion)
+## High-Level System Architecture (LLM → VLM → Detection → Motion)
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -18,9 +18,10 @@
 │  └────────────────────────────────────────────────────────┘  │
 │                       ↓                                      │
 │  ┌────────────────────────────────────────────────────────┐  │
-│  │  VLM Agent (Semantic Grounding)                        │  │
+│  │  VLM Agent (Vision + Detection)                        │  │
 │  │  - Input: /vlm_request (image + plan)                  │  │
-│  │  - Output: /vlm_grounding (target label + rationale)   │  │
+│  │  - Output: /target_detection (object, pixel, depth)    │  │
+│  │  - Provides: label, bbox, pixel coords, depth          │  │
 │  └────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────┘
          ↕ ROS 2 Network (pub/sub)
@@ -29,23 +30,25 @@
 │                                                              │
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │  RealSense Camera (RGB-D)                              │  │
+│  │  - Streams images to Jetson for VLM processing         │  │
 │  └────────────────────────────────────────────────────────┘  │
 │                       ↓                                      │
 │  ┌────────────────────────────────────────────────────────┐  │
-│  │  YOLO Detector (Precise Localization)                  │  │
-│  │  - Input: /vlm_grounding + /camera/color/image_raw     │  │
-│  │  - Output: /target_detection (bbox + depth)            │  │
+│  │  Coordinate Transformation Node                        │  │
+│  │  - Input: /target_detection (pixel + depth from VLM)   │  │
+│  │  - Output: /target_pose (x, y, z in robot frame)       │  │
+│  │  - Converts pixel+depth → robot coordinates            │  │
 │  └────────────────────────────────────────────────────────┘  │
 │                       ↓                                      │
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │  Coordinator Node                                      │  │
-│  │  - Orchestrates: LLM → VLM → YOLO → Motion             │  │
+│  │  - Orchestrates: LLM → VLM → Transform → Motion        │  │
 │  │  - Handles user confirmation before execution          │  │
 │  └────────────────────────────────────────────────────────┘  │
-│                       ↓                                      │  │
+│                       ↓                                      │
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │  Motion Execution Layer                                │  │
-│  │  - MoveIt 2 + cuMotion                                 │  │
+│  │  - MoveIt 2 + Franka Control                           │  │
 │  │  - Publishes: /execution_status                        │  │
 │  └────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────┘
@@ -57,8 +60,8 @@ UI: Single-page web dashboard (HTML/CSS/JS + jQuery) shows chat, live camera, st
 
 ## Deployment Split
 
-- **Jetson**: LLM + VLM only
-- **Controller PC**: Cameras + YOLO detection + Coordinator + Motion Execution + UI + Conversation Logger
+- **Jetson**: LLM + VLM (with integrated object detection)
+- **Controller PC**: Cameras + Coordinate Transform + Coordinator + Motion Execution + UI + Conversation Logger
 
 ---
 
@@ -70,27 +73,38 @@ UI: Single-page web dashboard (HTML/CSS/JS + jQuery) shows chat, live camera, st
 - [x] ROS 2 pub/sub setup (subscribes `/user_command`, publishes `/llm_response`)
 - [x] System prompt for task planning
 - [ ] Context tracking (conversation history)
-- [ ] State machine (IDLE → PLANNING → AWAITING_GROUNDING → READY)
-- [ ] Timeout handling for VLM/YOLO
+- [ ] State machine (IDLE → PLANNING → AWAITING_VLM → READY)
+- [ ] Timeout handling for VLM/Detection
 - [ ] Conversation logging (JSONL)
 - [ ] CLI chat node
 
-### Phase 2: VLM Agent (Semantic Grounding) - **SCAFFOLDED**
+### Phase 2: VLM Agent (Vision + Detection) - **IN PROGRESS**
 - [x] VLM package structure created
-- [ ] Define `/vlm_request` and `/vlm_grounding` topics
-- [ ] Integrate real VLM model (LLaVA / VILA)
-- [ ] Output target label and rationale for YOLO filtering
+- [x] Object detection working (outputs object label, pixel coords, depth)
+- [x] Current detection: "red dice" at pixel (870, 270), depth 0.478m
+- [ ] Define `/vlm_request` topic (image + task from LLM)
+- [ ] Define `/target_detection` topic (object, pixel, depth)
+- [ ] Integrate with LLM task planning
+- [ ] Handle multiple objects in scene
 
-### Phase 3: YOLO Detection (Precise Localization) - **IN PROGRESS** (Controller PC)
-- [x] YOLO package exists as `franka_vision_detection`
-- [ ] Subscribe to `/vlm_grounding` + camera image
-- [ ] Publish `/target_detection` (bbox + depth)
-- [ ] Validate latency and detection stability
+### Phase 3: Coordinate Transformation - **NOT STARTED** 🔴 (Controller PC)
+- [ ] Create transformation node
+- [ ] Subscribe to `/target_detection` (pixel + depth from VLM)
+- [ ] Subscribe to `/tf` (camera → robot base transform)
+- [ ] Subscribe to `/camera_info` (camera intrinsics)
+- [ ] Publish `/target_pose` (x, y, z in robot base frame)
+- [ ] Test with known object positions
+- [ ] Add RViz visualization of detected 3D points
 
-### Phase 4: Motion Execution - **PARTIAL** (Controller PC)
+### Phase 4: Motion Execution - **WORKING** ✅ (Controller PC)
 - [x] Basic joint control (demo.py on RTX6000)
 - [x] MoveIt 2 integration
-- [ ] Pick & place primitives
+- [x] Cartesian position control (x, y, z relative to base)
+- [x] Gripper control (open/close)
+- [x] Fixed gripper orientation for grasping (rx=0, ry=π, rz=2.45)
+- [x] Velocity scaling control
+- [ ] Pick & place primitives (grasp sequence)
+- [ ] Camera-to-robot coordinate transformation
 - [ ] Perception-aware planning (use target detection + 3D map)
 - [ ] Feedback loop (`/execution_status`) to coordinator
 
@@ -162,6 +176,156 @@ Implement and evaluate a distributed system where:
 ### Multi-Agent & Conversation Logging Goal
 - All inter-agent messages (user → LLM → VLM → YOLO → Coordinator → Motion) are logged as a chat-like transcript.
 - UI shows full agent chat + execution status + confirmation step.
+
+---
+
+## 🎯 NEXT PRIORITY TASKS (Feb 2026)
+
+### **IMMEDIATE (This Week)**
+
+#### 1. **Camera-to-Robot Coordinate Transformation** 🔴 CRITICAL
+**Goal**: Convert pixel (870, 270) + depth (0.478m) → robot coordinates (x, y, z)
+
+**Implementation**:
+- Create transformation node in `franka_vision_detection` package
+- Subscribe to:
+  - `/cameras/ee/ee_camera/aligned_depth_to_color/image_raw` (depth)
+  - `/cameras/ee/ee_camera/color/camera_info` (intrinsics)
+  - `/detection/detections` (YOLO output)
+  - `/tf` (camera → robot base transform)
+- Publish to:
+  - `/target_pose` (geometry_msgs/PoseStamped with x, y, z in robot base frame)
+
+**Algorithm**:
+```python
+# 1. Get pixel (u, v) from YOLO bbox center
+# 2. Get depth d from aligned depth image at (u, v)
+# 3. Convert to 3D camera coordinates using camera intrinsics:
+#    X_cam = (u - cx) * d / fx
+#    Y_cam = (v - cy) * d / fy
+#    Z_cam = d
+# 4. Transform from camera frame to robot base frame using TF:
+#    P_base = T_base_camera * P_camera
+```
+
+**Files to create**:
+- `src/franka_vision_detection/franka_vision_detection/coordinate_transform.py`
+
+**Testing**:
+- Place red dice at known position
+- Verify transformed coordinates match expected robot coordinates
+- Add visualization in RViz showing detected 3D point
+
+---
+
+#### 2. **Pick-and-Place Primitive** 🟡 HIGH PRIORITY
+**Goal**: Create automated pick-and-place sequence using detected coordinates
+
+**Implementation** (in `franka_motion_executor`):
+```python
+def pick_at_position(x, y, z, approach_height=0.3, grasp_width=0.03):
+    """
+    Pick object at detected position
+    1. Move to approach position (x, y, approach_height)
+    2. Open gripper to grasp_width
+    3. Move down to grasp height (x, y, z)
+    4. Close gripper
+    5. Lift to approach height
+    """
+    
+def place_at_position(x, y, z, approach_height=0.3):
+    """
+    Place object at target position
+    1. Move to approach position
+    2. Move down to place height
+    3. Open gripper
+    4. Lift away
+    """
+```
+
+**Testing**:
+- Manual test: `pick_at_position(0.5, 0.0, 0.15)`
+- Verify gripper grasps successfully
+- Test with different object heights
+
+---
+
+#### 3. **End-to-End Detection → Grasp Pipeline** 🟢 INTEGRATION
+**Goal**: Connect YOLO detection → coordinate transform → motion execution
+
+**Implementation**:
+Create simple integration node:
+```python
+# src/franka_coordinator/franka_coordinator/simple_pick.py
+
+class SimplePickNode:
+    def __init__(self):
+        self.target_sub = self.create_subscription(
+            PoseStamped, '/target_pose', self.target_callback, 10)
+        self.manip = FrankaManipulation(helper)
+    
+    def target_callback(self, msg):
+        x, y, z = msg.pose.position.x, msg.pose.position.y, msg.pose.position.z
+        self.logger.info(f"Picking object at ({x:.3f}, {y:.3f}, {z:.3f})")
+        self.manip.pick_at_position(x, y, z)
+```
+
+**Testing**:
+- Run full pipeline: detection → transform → pick
+- Place dice, detect it, robot picks it up
+- Verify success rate
+
+---
+
+### **SHORT TERM (Next 2 Weeks)**
+
+#### 4. **VLM Integration for Semantic Grounding**
+- Deploy LLaVA/VILA on Jetson
+- Create `/vlm_request` and `/vlm_grounding` topics
+- Test: "Pick the red dice" → VLM identifies "red dice" → YOLO filters for it
+
+#### 5. **Safety & Confirmation Layer**
+- Add user confirmation before executing motion
+- Implement workspace boundaries check
+- Add collision detection
+
+#### 6. **UI Dashboard**
+- Live camera feed with detection overlay
+- Agent conversation log
+- Confirm/Cancel buttons
+- Execution status display
+
+---
+
+### **MEDIUM TERM (Month 2-3)**
+
+#### 7. **LLM Task Planning**
+- Context tracking for multi-step tasks
+- State machine implementation
+- Conversation logging to JSONL
+
+#### 8. **Performance Evaluation**
+- Latency measurements (detection → execution)
+- Success rate tracking
+- Edge AI vs Cloud comparison
+
+---
+
+## 📋 Current Status Summary
+
+**✅ WORKING**:
+- YOLO detection (pixel + depth)
+- Motion control (x, y, z commands)
+- Gripper control
+- MoveIt2 integration
+
+**🔴 BLOCKING**:
+- Camera-to-robot coordinate transformation
+- Pick-and-place primitives
+
+**⏳ NEXT UP**:
+- End-to-end detection → grasp pipeline
+- VLM semantic grounding
 - UI starts with an assistant greeting and keeps a full timeline of logs.
 
 ### Task Evaluation

@@ -4,6 +4,29 @@ Franka FR3 Robot Motion Control Demo
 Edit this file to test different movements
 """
 
+import sys
+import os
+
+# CRITICAL: Fix sys.path BEFORE any ROS imports
+# When Python runs a script directly, it adds the script's directory to sys.path[0]
+# This causes import conflicts with ROS2 C extensions
+if __name__ == "__main__":
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Remove script directory and parent directories from sys.path
+    paths_to_remove = [
+        script_dir,
+        os.path.dirname(script_dir),  # franka_motion_executor package dir
+        os.path.dirname(os.path.dirname(script_dir))  # src dir
+    ]
+    for path in paths_to_remove:
+        while path in sys.path:
+            sys.path.remove(path)
+    
+    # Add the correct package path if not already there
+    package_root = os.path.dirname(os.path.dirname(script_dir))  # src/
+    if package_root not in sys.path:
+        sys.path.insert(0, package_root)
+
 import rclpy
 import time
 from rclpy.node import Node
@@ -18,18 +41,29 @@ new_home = [0.0022672999184578657, -0.7775366306304932, -0.0010969223221763968, 
 start_point = [0.5281668901443481, 0.7094740271568298, 0.022555384784936905, -1.8724782466888428, -0.05140479654073715, 2.5743796825408936, 1.3898661136627197]
 destination_point = [-0.3441236913204193, 0.6516157388687134, -0.01045239344239235, -2.0039167404174805, -0.0032070199958980083, 2.6653807163238525, 0.4480981230735779]
 # print(math.pi)
+print("new cashed code")
+
 
 # manip.move_to_joints(new_home, velocity_scaling=0.8)
-manip.move_to_position(0.5, 0, 0.5, 0, math.pi, 2.45, velocity_scaling=0.5)
+manip.move_home()
+time.sleep(1)
+manip.open_gripper(width=0.00)
+
+# Move to position - defaults handle gripper-down orientation
+manip.move_to_position(0.6, 0, 0.6, velocity_scaling=0.1)
+time.sleep(1)
+manip.open_gripper(width=0.08)
+manip.move_to_position(0.6, 0, 0.14, velocity_scaling=0.1)
+manip.open_gripper(width=0.03)
+manip.move_home()
+
 # manip.move_to_pose()
 # time.sleep(1)
-# manip.open_gripper(width=0.08)
 # time.sleep(2)
 # manip.move_to_joints(start_point, velocity_scaling=0.8)
 # time.sleep(1)
 # manip.open_gripper(width=0.08)
 # time.sleep(1)
-# manip.move_home()
 # time.sleep(2) # time.sleep(2) # manip.move_to_joints(start_point, velocity_scaling=0.5) # time.sleep(2) # manip.open_gripper(width=0.08) # time.sleep(2)
 # # manip.move_home()
 # # time.sleep(1)

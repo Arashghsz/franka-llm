@@ -26,7 +26,11 @@ def create_pose(x: float, y: float, z: float,
     """Create PoseStamped from position and Euler angles (roll, pitch, yaw)"""
     pose = PoseStamped()
     pose.header.frame_id = "fr3_link0"
-    pose.pose.position = Point(x=x, y=y, z=z)
+    
+    # Set position attributes directly (avoids PyFloat_Check assertion in constructor)
+    pose.pose.position.x = float(x)
+    pose.pose.position.y = float(y)
+    pose.pose.position.z = float(z)
     
     # Euler angles (radians) to Quaternion
     cy = math.cos(rz * 0.5)
@@ -41,7 +45,11 @@ def create_pose(x: float, y: float, z: float,
     qy = cr * sp * cy + sr * cp * sy
     qz = cr * cp * sy - sr * sp * cy
     
-    pose.pose.orientation = Quaternion(x=qx, y=qy, z=qz, w=w)
+    # Set orientation attributes directly (avoids PyFloat_Check assertion in constructor)
+    pose.pose.orientation.x = float(qx)
+    pose.pose.orientation.y = float(qy)
+    pose.pose.orientation.z = float(qz)
+    pose.pose.orientation.w = float(w)
     return pose
 
 
