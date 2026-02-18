@@ -13,7 +13,7 @@ vlm:
   model: "qwen2.5vl:32b"       # Mid-size Qwen vision model - balance of accuracy and stability
   ollama_url: "http://localhost:11434"
   temperature: 0.0                    # Lower = more consistent/deterministic
-  timeout: 120                        # Larger timeout for first load
+  timeout: 300                        # Extended timeout for large 32B model (5 minutes)
 
 # Debug Settings
 debug:

@@ -8,31 +8,36 @@ import rclpy
 import time
 from rclpy.node import Node
 from franka_motion_executor import FrankaHelperReal, FrankaManipulation
+import math
 
 rclpy.init()
 node = Node("franka_demo")
 helper = FrankaHelperReal(node, group_name="fr3_arm")
 manip = FrankaManipulation(helper)
+new_home = [0.0022672999184578657, -0.7775366306304932, -0.0010969223221763968, -2.3660757541656494, 0.0067384387366473675, 1.5651696920394897, 0.7884734272956848]
 start_point = [0.5281668901443481, 0.7094740271568298, 0.022555384784936905, -1.8724782466888428, -0.05140479654073715, 2.5743796825408936, 1.3898661136627197]
 destination_point = [-0.3441236913204193, 0.6516157388687134, -0.01045239344239235, -2.0039167404174805, -0.0032070199958980083, 2.6653807163238525, 0.4480981230735779]
+# print(math.pi)
 
-manip.move_home()
-time.sleep(1)
-manip.open_gripper(width=0.08)
-time.sleep(2)
-manip.move_to_joints(start_point, velocity_scaling=0.8)
-time.sleep(1)
-manip.open_gripper(width=0.03)
-time.sleep(1)
-manip.move_home()
-time.sleep(2) # time.sleep(2) # manip.move_to_joints(start_point, velocity_scaling=0.5) # time.sleep(2) # manip.open_gripper(width=0.08) # time.sleep(2)
-# manip.move_home()
+# manip.move_to_joints(new_home, velocity_scaling=0.8)
+manip.move_to_position(0.5, 0, 0.5, 0, math.pi, 2.45, velocity_scaling=0.5)
+# manip.move_to_pose()
 # time.sleep(1)
-manip.move_to_joints(destination_point, velocity_scaling=0.1)
-time.sleep(1)
-manip.open_gripper(width=0.08)
-time.sleep(1)
-manip.move_home()
+# manip.open_gripper(width=0.08)
+# time.sleep(2)
+# manip.move_to_joints(start_point, velocity_scaling=0.8)
+# time.sleep(1)
+# manip.open_gripper(width=0.08)
+# time.sleep(1)
+# manip.move_home()
+# time.sleep(2) # time.sleep(2) # manip.move_to_joints(start_point, velocity_scaling=0.5) # time.sleep(2) # manip.open_gripper(width=0.08) # time.sleep(2)
+# # manip.move_home()
+# # time.sleep(1)
+# manip.move_to_joints(destination_point, velocity_scaling=0.1)
+# time.sleep(1)
+# manip.open_gripper(width=0.08)
+# time.sleep(1)
+# manip.move_home()
 
 
 # current_joints = helper.get_current_joints()
