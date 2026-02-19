@@ -72,6 +72,9 @@ class VLMNode(Node):
         else:
             self.get_logger().warn(f'⚠ {msg}')
         
+        # Publish system info log
+        self._publish_system_info()
+        
         self.get_logger().info(
             f'VLM Node initialized:\n'
             f'  Model: {self.vlm_model}\n'
@@ -385,6 +388,23 @@ class VLMNode(Node):
         self.get_logger().info(
             f'📤 Published grounding: {target_name} bbox=[{x1},{y1},{x2},{y2}] → /vlm_grounding'
         )
+    
+    def _publish_system_info(self):
+        """Publish VLM system information on startup."""
+        info = {
+            'type': 'system_info',
+            'component': 'vlm',
+            'model': self.vlm_model,
+            'config': {
+                'temperature': self.temperature,
+                'timeout': self.timeout,
+                'save_images': self.save_images
+            }
+        }
+        msg = String()
+        msg.data = json.dumps(info)
+        self.explanation_pub.publish(msg)
+        self.get_logger().info(f'Published VLM system info: {self.vlm_model}')
 
 
 def main(args=None):

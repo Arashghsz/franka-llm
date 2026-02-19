@@ -49,6 +49,11 @@ class FrankaCoordinator(Node):
         self.camera_intrinsics = None
         self.bridge = CvBridge()
         
+        # Stored for confirmation flow
+        self.last_target_position = None
+        self.last_target_name = None
+        self.last_action = None
+        
         # Coordinate transformer (pixel → robot frame)
         self.transformer = CoordinateTransformer(
             node=self,
@@ -97,6 +102,11 @@ class FrankaCoordinator(Node):
         )
         self.motion_status_sub = self.create_subscription(
             String, '/motion/status', self.handle_motion_status, 10
+        )
+        
+        # Subscriber for user confirmation from web
+        self.user_confirmation_sub = self.create_subscription(
+            String, '/user_confirmation', self.handle_user_confirmation, 10
         )
         
         # Subscriber for robot state
@@ -323,18 +333,18 @@ class FrankaCoordinator(Node):
             self.get_logger().info(f'   Center pixel: {center}')
             self.get_logger().info(f'   Action: {action}')
             
-            # Convert center pixel + depth → robot frame coordinates
-            position_robot = self._convert_pixel_to_robot_frame(center, target)
+            # Use fixed position instead of camera transform
+            import numpy as np
+            position_robot = np.array([0.5, -0.2, 0.5])  # x=60cm, y=-20cm, z=50cm (FIXED)
+            self.get_logger().info('   Using FIXED position: x=0.5, y=-0.2, z=0.5')
             
-            if position_robot is not None:
-                # Publish target position for motion executor
-                self._publish_target_position(position_robot, target, action)
-                
-                # Send motion command for pick/place actions
-                if action in ['pick', 'place']:
-                    self._send_motion_command(action, target)
-            else:
-                self.get_logger().error(f'❌ Failed to resolve 3D position for "{target}"')
+            # Store position for republishing on user confirmation
+            self.last_target_position = position_robot
+            self.last_target_name = target
+            self.last_action = action
+            
+            # Publish target position for motion executor preview
+            self._publish_target_position(position_robot, target, action)
                 
         except Exception as e:
             self.get_logger().error(f'Error handling VLM grounding: {e}')
@@ -525,6 +535,44 @@ class FrankaCoordinator(Node):
         self.status_pub.publish(
             String(data=json.dumps(status_msg))
         )
+    
+    def handle_user_confirmation(self, msg: String):
+        """Handle user confirmation from web dashboard."""
+        try:
+            confirmation = json.loads(msg.data)
+            confirmed = confirmation.get('confirmed', False)
+            motion = confirmation.get('motion', {})
+            
+            if confirmed:
+                # User approved - republish target position and send motion command
+                target = motion.get('target', 'object')
+                action = motion.get('action', 'pick')
+                
+                self.get_logger().info(f'✓ User approved motion: {action} {target}')
+                
+                # Republish target position to ensure motion executor has it
+                if self.last_target_position is not None:
+                    self.get_logger().info(f'Position stored: {self.last_target_position}')
+                    self._publish_target_position(self.last_target_position, target, action)
+                    self.get_logger().info('✓ Republished target position for motion executor')
+                    
+                    # Small delay to ensure position arrives before command
+                    import time
+                    time.sleep(0.1)
+                else:
+                    self.get_logger().error('✗ No stored position to republish!')
+                
+                # Send pick command
+                self._send_motion_command(action, target)
+                self.get_logger().info(f'✓ Sent motion command: {action}')
+                # time.sleep(2.0)  # Wait for pick to complete
+                # self._send_motion_command('place', 'drop_zone')
+                
+            else:
+                self.get_logger().info('✗ User cancelled motion')
+                
+        except Exception as e:
+            self.get_logger().error(f'Error handling user confirmation: {e}')
 
 
 def main(args=None):

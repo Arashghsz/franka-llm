@@ -10,6 +10,7 @@ class StatusModule {
         this.llmState = document.getElementById('llmState');
         this.bridgeState = document.getElementById('bridgeState');
         this.monitoringInterval = null;
+        this.subscribed = false;
     }
 
     startMonitoring() {
@@ -17,6 +18,10 @@ class StatusModule {
         if (window.ros) {
             // Try to subscribe if connected, or set up subscription for when it connects
             const subscribe = () => {
+                if (this.subscribed) {
+                    return; // Already subscribed
+                }
+                
                 if (window.ros && window.ros.isConnected()) {
                     try {
                         window.ros.subscribe(
@@ -31,20 +36,30 @@ class StatusModule {
                                 }
                             }
                         );
-                        console.log('Subscribed to /web/status');
+                        this.subscribed = true;
+                        console.log('✅ Subscribed to /web/status');
                     } catch (e) {
                         console.error('Error subscribing to /web/status:', e);
                     }
+                } else {
+                    console.log('⏳ Waiting for ROS connection to subscribe to /web/status');
                 }
             };
             
             // Subscribe immediately if already connected
             subscribe();
             
-            // Try again if connection not ready yet
-            if (!window.ros.isConnected()) {
-                setTimeout(subscribe, 1000);
-            }
+            // Retry periodically until connected
+            const retryInterval = setInterval(() => {
+                if (this.subscribed) {
+                    clearInterval(retryInterval);
+                } else {
+                    subscribe();
+                }
+            }, 1000);
+            
+            // Stop retrying after 10 seconds
+            setTimeout(() => clearInterval(retryInterval), 10000);
         }
 
         // Check connection status every 2 seconds

@@ -56,6 +56,7 @@ class LLMCoordinator(Node):
         self.vlm_request_pub = self.create_publisher(String, '/vlm_request', 10)
         self.motion_command_pub = self.create_publisher(String, '/motion_command', 10)
         self.response_pub = self.create_publisher(String, '/coordinator_response', 10)
+        self.status_pub = self.create_publisher(String, '/coordinator/status', 10)
         
         # Subscribers
         self.user_command_sub = self.create_subscription(
@@ -91,6 +92,13 @@ class LLMCoordinator(Node):
         self.waiting_for_vlm = False
         self.waiting_for_motion = False
         self.last_vlm_position = None
+        
+        # Status tracking
+        self.vlm_active = False
+        self.motion_active = False
+        
+        # Status publishing timer (every 1 second)
+        self.status_timer = self.create_timer(1.0, self.publish_status)
         
         # System prompt for routing decisions
         self.system_prompt = """You are an intelligent, friendly robot coordinator for a Franka manipulator arm.
@@ -137,6 +145,9 @@ Examples:
         self.get_logger().info(f'LLM Coordinator started. Model: {self.model}')
         self.get_logger().info('This node routes commands to VLM or Motion agents')
         self.get_logger().info('Listening on: /user_command')
+        
+        # Publish system info
+        self._publish_system_info()
     
     def _find_config_file(self) -> Path:
         """Find config.yaml in workspace"""
@@ -204,6 +215,9 @@ Examples:
         # Store current request
         self.current_request = user_input
         
+        # Send log message to web
+        self._publish_log(f'LLM Coordinator ({self.model})', 'Analyzing request with language model...')
+        
         # Query LLM for routing decision
         self.get_logger().info('Consulting LLM for routing decision...')
         decision = self.query_llm(user_input)
@@ -218,6 +232,26 @@ Examples:
         self.get_logger().info(f'  Target Agent: {decision.get("target_agent")}')
         self.get_logger().info(f'  Action: {decision.get("action")}')
         self.get_logger().info(f'  Reasoning: {decision.get("reasoning")}')
+        
+        # Send routing decision to web
+        target_agent = decision.get('target_agent', '').lower()
+        intent = decision.get('intent', 'unknown')
+        reasoning = decision.get('reasoning', '')
+        
+        # Log LLM decision details
+        self._publish_log(f'💭 LLM ({self.model})', 
+                         f'Decision: **{intent}** → Routing to **{target_agent}**')
+        if reasoning:
+            self._publish_log(f'LLM Reasoning', reasoning)
+        
+        if target_agent == 'vlm':
+            self._publish_log('LLM Coordinator', 'Routing to Vision Agent for scene analysis')
+        elif target_agent == 'both':
+            self._publish_log('LLM Coordinator', 'Routing to Vision Agent first, then Motion Executor')
+        elif target_agent == 'motion':
+            self._publish_log('LLM Coordinator', 'Routing to Motion Executor')
+        elif target_agent == 'none':
+            self._publish_log('LLM Coordinator', 'Handling as direct response')
         
         # Route based on decision
         target_agent = decision.get('target_agent', '').lower()
@@ -260,6 +294,9 @@ Examples:
                 vlm_request['type'] = 'locate'
                 vlm_request['object'] = target_object
                 self.get_logger().info(f'Requesting VLM to locate: {target_object}')
+                self._publish_log('Vision Agent', f'Searching for: {target_object}')
+        else:
+            self._publish_log('Vision Agent', 'Analyzing scene...')
         
         msg = String()
         msg.data = json.dumps(vlm_request)
@@ -298,12 +335,14 @@ Examples:
             return
         
         self.waiting_for_vlm = False
+        self.vlm_active = True
         explanation = msg.data
         
         self.get_logger().info(f'Received VLM response: {explanation[:100]}...')
         
-        # Publish back to user
-        self.publish_response(f'[VLM] {explanation}')
+        # Don't republish - web_handler already handles /vlm/explanation directly
+        # Just log that we received it
+        self._publish_log('LLM Coordinator', 'Vision analysis received, processing...')
     
     def vlm_position_callback(self, msg: PoseStamped):
         """Handle VLM 3D position updates."""
@@ -342,6 +381,50 @@ Examples:
         msg.data = message
         self.response_pub.publish(msg)
         self.get_logger().info(f'Response: {message}')
+    
+    def _publish_log(self, agent_name: str, message: str):
+        """Publish log message for web display."""
+        log_msg = {
+            'type': 'log',
+            'sender': 'system',
+            'agent_name': agent_name,
+            'message': message,
+            'timestamp': datetime.now().isoformat()
+        }
+        # Publish as coordinator response with special formatting
+        msg = String()
+        msg.data = f'[LOG]{json.dumps(log_msg)}'
+        self.response_pub.publish(msg)
+    
+    def publish_status(self):
+        """Publish coordinator status."""
+        status = {
+            'robot_state': 'idle',
+            'vision_state': 'online' if self.vlm_active else 'offline',
+            'llm_state': 'online',
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        msg = String()
+        msg.data = json.dumps(status)
+        self.status_pub.publish(msg)
+    
+    def _publish_system_info(self):
+        """Publish LLM system information on startup."""
+        info = {
+            'type': 'system_info',
+            'component': 'llm',
+            'model': self.model,
+            'config': {
+                'ollama_url': self.ollama_url,
+                'temperature': self.temperature,
+                'timeout': self.timeout
+            }
+        }
+        msg = String()
+        msg.data = json.dumps(info)
+        self.response_pub.publish(msg)
+        self.get_logger().info(f'Published LLM system info: {self.model}')
 
 
 def main(args=None):

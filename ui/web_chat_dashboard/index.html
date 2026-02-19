@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Franka LLM - AI Robot Controller</title>
+    <title>Franka Controller</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
@@ -14,18 +14,21 @@
         <aside class="sidebar">
             <div class="sidebar-header">
                 <img src="assets/logo.png" alt="Franka" class="sidebar-logo">
-                <h1 class="sidebar-title">Franka LLM</h1>
+                <h1 class="sidebar-title">Franka Controller</h1>
             </div>
             
             <nav class="sidebar-nav">
-                <button class="nav-item active" id="chatNavBtn">
-                    <i class="fas fa-comment-dots"></i> Chat
+                <button class="nav-item active" data-view="chat">
+                    <i class="fas fa-comments"></i>
+                    <span>Chat</span>
                 </button>
-                <button class="nav-item" id="statusNavBtn">
-                    <i class="fas fa-heartbeat"></i> Status
+                <button class="nav-item" data-view="status">
+                    <i class="fas fa-info-circle"></i>
+                    <span>Status</span>
                 </button>
-                <button class="nav-item" id="cameraNavBtn">
-                    <i class="fas fa-camera"></i> Camera
+                <button class="nav-item" data-view="logs">
+                    <i class="fas fa-list"></i>
+                    <span>Logs</span>
                 </button>
             </nav>
             
@@ -44,17 +47,13 @@
                 <div class="chat-container">
                     <!-- Chat Header -->
                     <div class="chat-header">
-                        <h2>Franka AI Controller</h2>
-                        <p class="text-muted">Control your robot with natural language</p>
+                        <h2>Welcome to Franka Controller</h2>
+                        <!-- <p class="text-muted">Control your robot with natural language</p> -->
                     </div>
 
                     <!-- Chat Messages -->
                     <div class="chat-messages" id="chatHistory">
-                        <div class="message-container system">
-                            <div class="message-bubble">
-                                <p>👋 Welcome! I'm your Franka robot assistant. You can ask me to perform tasks like "pick up the red cube" or "move to home position".</p>
-                            </div>
-                        </div>
+                        <!-- Welcome message will be added by chat.js -->
                     </div>
 
                     <!-- Chat Input -->
@@ -71,7 +70,6 @@
                                 <i class="fas fa-paper-plane"></i>
                             </button>
                         </div>
-                        <p class="input-hint">Press Enter to send • Powered by LLM + Vision</p>
                     </div>
                 </div>
             </div>
@@ -116,17 +114,18 @@
                 </div>
             </div>
 
-            <!-- Camera View -->
-            <div class="view-container" id="cameraView">
-                <div class="camera-container">
+            <!-- Logs View -->
+            <div class="view-container" id="logsView">
+                <div class="logs-container">
                     <div class="section-header">
-                        <h2>Robot Camera Feed</h2>
+                        <h2>System Logs</h2>
+                        <button id="clearLogsBtn" class="clear-logs-btn">Clear All</button>
                     </div>
-                    <div class="camera-feed">
-                        <canvas id="cameraCanvas"></canvas>
-                        <div class="camera-placeholder">
-                            <i class="fas fa-camera"></i>
-                            <p>Camera feed will appear here</p>
+                    
+                    <div class="logs-content" id="logsContent">
+                        <div class="log-entry">
+                            <span class="log-agent">System</span>
+                            <span class="log-text">Logs will appear here as the system processes requests...</span>
                         </div>
                     </div>
                 </div>
@@ -134,31 +133,11 @@
         </main>
     </div>
 
-    <!-- Confirmation Modal -->
-    <div class="modal fade" id="confirmModal" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Confirm Action</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <p id="confirmMessage"></p>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" id="confirmNo" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" id="confirmYes">Confirm</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="modules/utils.js"></script>
     <script src="rosbridge.js"></script>
     <script src="modules/chat.js"></script>
-    <script src="modules/camera.js"></script>
     <script src="modules/status.js"></script>
     <script src="modules/confirm.js"></script>
     <script src="app.js"></script>

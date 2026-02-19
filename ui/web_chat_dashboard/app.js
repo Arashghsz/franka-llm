@@ -18,7 +18,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Initialize modules
     window.chatModule = new ChatModule();
-    window.cameraModule = new CameraModule();
     window.statusModule = new StatusModule();
     window.confirmModule = new ConfirmModule();
 
@@ -46,9 +45,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Start periodic status updates
     window.statusModule.startMonitoring();
-
-    // Start camera feed
-    window.cameraModule.startFeed();
     
     // Monitor ROS connection status in sidebar
     updateConnectionStatus();
@@ -77,24 +73,27 @@ function updateConnectionStatus() {
  * Setup navigation between views
  */
 function setupNavigation() {
-    const chatNavBtn = document.getElementById('chatNavBtn');
-    const statusNavBtn = document.getElementById('statusNavBtn');
-    const cameraNavBtn = document.getElementById('cameraNavBtn');
+    const navButtons = document.querySelectorAll('.nav-item');
+    const views = document.querySelectorAll('.view-container');
 
-    const chatView = document.getElementById('chatView');
-    const statusView = document.getElementById('statusView');
-    const cameraView = document.getElementById('cameraView');
-
-    chatNavBtn.addEventListener('click', () => {
-        switchView(chatView, chatNavBtn);
-    });
-
-    statusNavBtn.addEventListener('click', () => {
-        switchView(statusView, statusNavBtn);
-    });
-
-    cameraNavBtn.addEventListener('click', () => {
-        switchView(cameraView, cameraNavBtn);
+    navButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const viewName = button.getAttribute('data-view');
+            
+            // Update active nav button
+            navButtons.forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+            
+            // Show selected view
+            views.forEach(view => {
+                view.classList.remove('active');
+                if (view.id === `${viewName}View`) {
+                    view.classList.add('active');
+                }
+            });
+            
+            console.log(`Switched to ${viewName} view`);
+        });
     });
 }
 
