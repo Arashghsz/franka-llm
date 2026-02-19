@@ -11,6 +11,7 @@ Handles:
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from std_msgs.msg import String, Bool
 from geometry_msgs.msg import PoseStamped, Point
 from sensor_msgs.msg import Image, CameraInfo
@@ -19,6 +20,7 @@ from datetime import datetime
 from enum import Enum
 import numpy as np
 from cv_bridge import CvBridge
+from .coordinate_transformer import CoordinateTransformer
 
 # Message types (we'll use std_msgs.String with JSON for now)
 class TaskStatus(Enum):
@@ -46,6 +48,13 @@ class FrankaCoordinator(Node):
         self.latest_depth_image = None
         self.camera_intrinsics = None
         self.bridge = CvBridge()
+        
+        # Coordinate transformer (pixel → robot frame)
+        self.transformer = CoordinateTransformer(
+            node=self,
+            robot_frame='fr3_link0',  # Franka FR3 robot base
+            camera_frame='ee_d435i_color_optical_frame'  # RealSense D435i optical frame
+        )
         
         # Publisher for outgoing commands
         self.llm_request_pub = self.create_publisher(
@@ -95,18 +104,25 @@ class FrankaCoordinator(Node):
             String, '/robot/state', self.handle_robot_state, 10
         )
         
+        # QoS profile for RealSense camera (uses BEST_EFFORT reliability)
+        camera_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+        
         # Subscribers for depth image and camera info
         self.depth_sub = self.create_subscription(
             Image,
             '/cameras/ee/ee_camera/aligned_depth_to_color/image_raw',
             self.depth_callback,
-            10
+            camera_qos
         )
         self.camera_info_sub = self.create_subscription(
             CameraInfo,
             '/cameras/ee/ee_camera/color/camera_info',
             self.camera_info_callback,
-            10
+            camera_qos
         )
         
         # Timer for periodic status checks
@@ -279,104 +295,219 @@ class FrankaCoordinator(Node):
                 'height': msg.height
             }
             self.get_logger().info(f'Camera intrinsics loaded: {self.camera_intrinsics}')
+            
+            # Also update the transformer
+            self.transformer.update_camera_intrinsics(msg)
     
     def handle_vlm_grounding(self, msg: String):
         """
-        Handle VLM grounding results (bbox + target)
-        Convert bbox to 3D coordinates using depth
+        Handle VLM grounding results (center + target).
+        Converts pixel center + depth → 3D robot coordinates.
+        Publishes result for motion executor.
         """
         try:
             grounding = json.loads(msg.data)
             target = grounding.get('target', '')
-            bbox = grounding.get('bbox', None)
+            center = grounding.get('center', None)  # Use center directly from VLM
+            action = grounding.get('action', 'locate')  # pick, place, locate
             
-            if not bbox or self.latest_depth_image is None or self.camera_intrinsics is None:
+            if not center or self.latest_depth_image is None or self.camera_intrinsics is None:
                 self.get_logger().warn(
-                    f'Cannot resolve 3D position: bbox={bbox is not None}, '
-                    f'depth={self.latest_depth_image is not None}, '
+                    f'⚠️  Cannot resolve 3D position for "{target}": '
+                    f'center={center is not None}, depth={self.latest_depth_image is not None}, '
                     f'intrinsics={self.camera_intrinsics is not None}'
                 )
                 return
             
-            # Resolve 3D position from bbox and depth
-            position_3d = self.resolve_3d_position(bbox, self.latest_depth_image, self.camera_intrinsics)
+            self.get_logger().info(f'🎯 Processing VLM detection: {target}')
+            self.get_logger().info(f'   Center pixel: {center}')
+            self.get_logger().info(f'   Action: {action}')
             
-            if position_3d is not None:
-                self.get_logger().info(
-                    f'Target "{target}" located at 3D position: '
-                    f'[{position_3d[0]:.3f}, {position_3d[1]:.3f}, {position_3d[2]:.3f}] meters'
-                )
+            # Convert center pixel + depth → robot frame coordinates
+            position_robot = self._convert_pixel_to_robot_frame(center, target)
+            
+            if position_robot is not None:
+                # Publish target position for motion executor
+                self._publish_target_position(position_robot, target, action)
                 
-                # Publish 3D target position
-                pose_msg = PoseStamped()
-                pose_msg.header.stamp = self.get_clock().now().to_msg()
-                pose_msg.header.frame_id = 'camera_color_optical_frame'
-                pose_msg.pose.position.x = position_3d[0]
-                pose_msg.pose.position.y = position_3d[1]
-                pose_msg.pose.position.z = position_3d[2]
-                pose_msg.pose.orientation.w = 1.0
-                
-                self.target_position_pub.publish(pose_msg)
+                # Send motion command for pick/place actions
+                if action in ['pick', 'place']:
+                    self._send_motion_command(action, target)
             else:
-                self.get_logger().error(f'Failed to resolve 3D position for {target}')
+                self.get_logger().error(f'❌ Failed to resolve 3D position for "{target}"')
                 
         except Exception as e:
             self.get_logger().error(f'Error handling VLM grounding: {e}')
     
+    def _convert_pixel_to_robot_frame(self, center, target_name: str):
+        """
+        Convert center pixel to 3D coordinates in robot base frame.
+        
+        Args:
+            center: [x, y] pixel coordinates (center of object from VLM)
+            target_name: Object name for logging
+            
+        Returns:
+            numpy array [x, y, z] in robot frame, or None if failed
+        """
+        pixel_u, pixel_v = center[0], center[1]
+        
+        # Get depth at center pixel (use small region for robustness)
+        height, width = self.latest_depth_image.shape
+        pixel_v = max(0, min(pixel_v, height - 1))
+        pixel_u = max(0, min(pixel_u, width - 1))
+        
+        # Extract depth from small region around center (5x5)
+        y1 = max(0, pixel_v - 2)
+        y2 = min(height, pixel_v + 3)
+        x1 = max(0, pixel_u - 2)
+        x2 = min(width, pixel_u + 3)
+        
+        roi = self.latest_depth_image[y1:y2, x1:x2]
+        valid_depths = roi[roi > 0]
+        
+        if len(valid_depths) == 0:
+            self.get_logger().warn(f'No valid depth at pixel ({pixel_u}, {pixel_v})')
+            return None
+        
+        # Use median depth for robustness
+        import numpy as np
+        depth_m = float(np.median(valid_depths))
+        
+        self.get_logger().info(
+            f'   Pixel ({pixel_u}, {pixel_v}) → Depth: {depth_m:.3f}m (median of {len(valid_depths)} points)'
+        )
+        
+        # Convert to robot frame using transformer
+        position_robot = self.transformer.pixel_to_robot_frame(
+            pixel_u=pixel_u,
+            pixel_v=pixel_v,
+            depth_m=depth_m
+        )
+        
+        if position_robot is not None:
+            self.get_logger().info(
+                f'✅ "{target_name}" located in ROBOT FRAME:\n'
+                f'   X = {position_robot[0]:+.4f} m  ({"forward" if position_robot[0] > 0 else "backward"})\n'
+                f'   Y = {position_robot[1]:+.4f} m  ({"left" if position_robot[1] > 0 else "right"})\n'
+                f'   Z = {position_robot[2]:+.4f} m  (height from base)'
+            )
+        
+        return position_robot
+    
+    def _convert_bbox_to_robot_frame(self, bbox, target_name: str):
+        """
+        Convert bounding box to 3D coordinates in robot base frame.
+        (Legacy method - kept for compatibility)
+        
+        Args:
+            bbox: [x1, y1, x2, y2] pixel coordinates
+            target_name: Object name for logging
+            
+        Returns:
+            numpy array [x, y, z] in robot frame, or None if failed
+        """
+        position_robot = self.transformer.bbox_to_robot_frame(
+            bbox=bbox,
+            depth_image=self.latest_depth_image,
+            method='median'  # Robust depth estimation
+        )
+        
+        if position_robot is not None:
+            self.get_logger().info(
+                f'✅ "{target_name}" located in ROBOT FRAME:\n'
+                f'   X = {position_robot[0]:+.4f} m  ({"forward" if position_robot[0] > 0 else "backward"})\n'
+                f'   Y = {position_robot[1]:+.4f} m  ({"left" if position_robot[1] > 0 else "right"})\n'
+                f'   Z = {position_robot[2]:+.4f} m  (height from base)'
+            )
+        
+        return position_robot
+    
+    def _publish_target_position(self, position, target_name: str, action: str = 'locate'):
+        """
+        Publish target position for motion executor.
+        
+        Args:
+            position: numpy array [x, y, z] in robot frame
+            target_name: Object name
+            action: Action type (pick, place, locate)
+        """
+        pose_msg = PoseStamped()
+        pose_msg.header.stamp = self.get_clock().now().to_msg()
+        pose_msg.header.frame_id = 'fr3_link0'  # FR3 robot base frame
+        pose_msg.pose.position.x = float(position[0])
+        pose_msg.pose.position.y = float(position[1])
+        pose_msg.pose.position.z = float(position[2])
+        
+        # Default orientation (gripper pointing down)
+        pose_msg.pose.orientation.w = 1.0
+        pose_msg.pose.orientation.x = 0.0
+        pose_msg.pose.orientation.y = 0.0
+        pose_msg.pose.orientation.z = 0.0
+        
+        self.target_position_pub.publish(pose_msg)
+        
+        self.get_logger().info(
+            f'📤 Published target position for "{target_name}" (action: {action})'
+        )
+    
+    def _send_motion_command(self, action: str, target_name: str):
+        """
+        Send motion command to motion executor.
+        
+        Args:
+            action: 'pick' or 'place'
+            target_name: Object/location name
+        """
+        command = {
+            'action': action,
+            'parameters': {
+                'object' if action == 'pick' else 'location': target_name
+            }
+        }
+        
+        msg = String()
+        msg.data = json.dumps(command)
+        self.motion_command_pub.publish(msg)
+        
+        self.get_logger().info(
+            f'📤 Sent motion command: {action} "{target_name}"'
+        )
+    
     def resolve_3d_position(self, bbox, depth_image, camera_intrinsics):
         """
-        Convert VLM bounding box to 3D coordinates
+        Convert VLM bounding box to 3D coordinates in ROBOT BASE FRAME.
+        Uses TF2 for proper camera-to-robot transformation.
         
         Args:
             bbox: [x1, y1, x2, y2] in pixel coordinates
             depth_image: numpy array with depth in meters
-            camera_intrinsics: dict with fx, fy, ppx, ppy
+            camera_intrinsics: dict with fx, fy, ppx, ppy (not used if transformer available)
         
         Returns:
-            [x, y, z] in meters in camera frame, or None if invalid
+            [x, y, z] in meters in ROBOT BASE FRAME (fr3_link0), or None if invalid
         """
         try:
-            # 1. Get bbox centroid
-            x1, y1, x2, y2 = bbox
-            cx = int((x1 + x2) / 2)
-            cy = int((y1 + y2) / 2)
+            # Use the new transformer with TF support!
+            position_robot = self.transformer.bbox_to_robot_frame(
+                bbox=bbox,
+                depth_image=depth_image,
+                method='median'  # Robust depth estimation
+            )
             
-            # Clamp to image bounds
-            cy = max(0, min(cy, depth_image.shape[0] - 1))
-            cx = max(0, min(cx, depth_image.shape[1] - 1))
-            y1 = max(0, min(int(y1), depth_image.shape[0] - 1))
-            y2 = max(0, min(int(y2), depth_image.shape[0] - 1))
-            x1 = max(0, min(int(x1), depth_image.shape[1] - 1))
-            x2 = max(0, min(int(x2), depth_image.shape[1] - 1))
+            if position_robot is not None:
+                self.get_logger().info(
+                    f'🤖 ROBOT BASE FRAME: X={position_robot[0]:.3f}m, Y={position_robot[1]:.3f}m, Z={position_robot[2]:.3f}m'
+                )
             
-            # 2. Look up depth at centroid (with median filter for robustness)
-            roi = depth_image[y1:y2, x1:x2]
-            valid_depths = roi[roi > 0]  # Ignore zero (invalid) depths
-            
-            if len(valid_depths) == 0:
-                self.get_logger().warn('No valid depth values in ROI')
-                return None
-            
-            depth_z = float(np.median(valid_depths))
-            
-            self.get_logger().info(f'Bbox centroid: ({cx}, {cy}), Depth: {depth_z:.3f}m')
-            
-            # 3. Deproject pixel to 3D point using camera intrinsics
-            fx = camera_intrinsics['fx']
-            fy = camera_intrinsics['fy']
-            ppx = camera_intrinsics['ppx']
-            ppy = camera_intrinsics['ppy']
-            
-            x = (cx - ppx) * depth_z / fx
-            y = (cy - ppy) * depth_z / fy
-            z = depth_z
-            
-            # 4. Transform from camera frame to robot base frame (TODO: add TF)
-            # For now, return in camera frame
-            return [x, y, z]
+            return position_robot
             
         except Exception as e:
             self.get_logger().error(f'Error in 3D position resolution: {e}')
+            self.get_logger().error(
+                'Make sure camera TF is being published! '
+                'Launch camera calibration: ros2 launch realsense_cameras ee_camera_tf.launch.py'
+            )
             return None
     
     def publish_status(self):

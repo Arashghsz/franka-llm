@@ -19,6 +19,7 @@ setup(
     license='MIT',
     entry_points={
         'console_scripts': [
+            'motion_executor=franka_motion_executor.motion_executor_node:main',
         ],
     },
 )

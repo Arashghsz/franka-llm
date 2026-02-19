@@ -211,16 +211,21 @@ class FrankaHelperReal:
             
             # Send goal
             send_future = self.move_group_client.send_goal_async(goal)
-            rclpy.spin_until_future_complete(self.node, send_future, timeout_sec=5.0)
+            
+            start_time = time.time()
+            while not send_future.done() and (time.time() - start_time) < 5.0:
+                time.sleep(0.01)
             
             if send_future.done():
                 goal_handle = send_future.result()
                 if goal_handle.accepted:
-                    self.logger.info(f"[{self.group_name}] Motion goal accepted - robot is moving")
+                    self.logger.info(f"[{self.group_name}] Joint trajectory goal accepted")
                     
                     # Wait for result
                     result_future = goal_handle.get_result_async()
-                    rclpy.spin_until_future_complete(self.node, result_future, timeout_sec=timeout_sec)
+                    start_time = time.time()
+                    while not result_future.done() and (time.time() - start_time) < timeout_sec:
+                        time.sleep(0.01)
                     
                     if result_future.done():
                         self.logger.info(f"[{self.group_name}] Motion completed")
@@ -294,7 +299,10 @@ class FrankaHelperReal:
             
             # Send goal
             send_future = self.move_group_client.send_goal_async(goal)
-            rclpy.spin_until_future_complete(self.node, send_future, timeout_sec=5.0)
+            
+            start_time = time.time()
+            while not send_future.done() and (time.time() - start_time) < 5.0:
+                time.sleep(0.01)
             
             if send_future.done():
                 goal_handle = send_future.result()
@@ -303,7 +311,9 @@ class FrankaHelperReal:
                     
                     # Wait for result
                     result_future = goal_handle.get_result_async()
-                    rclpy.spin_until_future_complete(self.node, result_future, timeout_sec=timeout_sec)
+                    start_time = time.time()
+                    while not result_future.done() and (time.time() - start_time) < timeout_sec:
+                        time.sleep(0.01)
                     
                     if result_future.done():
                         self.logger.info(f"[{self.group_name}] Motion completed")
@@ -395,13 +405,18 @@ class FrankaHelperReal:
             goal.speed = 0.1
             
             send_future = self.gripper_client.send_goal_async(goal)
-            rclpy.spin_until_future_complete(self.node, send_future, timeout_sec=10.0)
+            
+            start_time = time.time()
+            while not send_future.done() and (time.time() - start_time) < 10.0:
+                time.sleep(0.01)
             
             if send_future.done():
                 goal_handle = send_future.result()
                 if goal_handle.accepted:
                     result_future = goal_handle.get_result_async()
-                    rclpy.spin_until_future_complete(self.node, result_future, timeout_sec=10.0)
+                    start_time = time.time()
+                    while not result_future.done() and (time.time() - start_time) < 10.0:
+                        time.sleep(0.01)
                     if result_future.done():
                         return True
             
@@ -434,13 +449,18 @@ class FrankaHelperReal:
             goal.speed = 0.1
             
             send_future = self.gripper_client.send_goal_async(goal)
-            rclpy.spin_until_future_complete(self.node, send_future, timeout_sec=10.0)
+            
+            start_time = time.time()
+            while not send_future.done() and (time.time() - start_time) < 10.0:
+                time.sleep(0.01)
             
             if send_future.done():
                 goal_handle = send_future.result()
                 if goal_handle.accepted:
                     result_future = goal_handle.get_result_async()
-                    rclpy.spin_until_future_complete(self.node, result_future, timeout_sec=10.0)
+                    start_time = time.time()
+                    while not result_future.done() and (time.time() - start_time) < 10.0:
+                        time.sleep(0.01)
                     if result_future.done():
                         return True
             

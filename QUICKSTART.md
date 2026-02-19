@@ -161,9 +161,23 @@ ros2 topic echo /vlm_center_position
 ✅ VLM locates **object centers** (not just image center)
 ✅ VLM provides 3D position of target object's center pixel
 ✅ Depth resolution integrated into VLM agent
+✅ Coordinator uses VLM center pixel directly (no bbox recalculation) - **Updated Feb 19, 2026**
+✅ Camera→robot TF transform configured
 ✅ Simple, clean architecture with clear separation of concerns
-⚠️ Motion execution not yet connected
-⚠️ TF camera→robot transform needed for motion planning
+⚠️ Motion execution not yet fully tested
+⚠️ Hand-eye calibration may need adjustment for accurate positioning
+
+### Camera Transform
+The camera-to-robot transform is configured as:
+```bash
+ros2 run tf2_ros static_transform_publisher \
+  0.0458961 -0.0368559 0.0567165 \
+  -0.000400857 -0.00425145 0.698275 0.715817 \
+  fr3_hand ee_d435i_color_optical_frame
+```
+- **Translation**: [0.046m, -0.037m, 0.057m]
+- **Rotation**: Quaternion [-0.0004, -0.004, 0.698, 0.716]
+- **Recalibrate**: Use `python3 calibrate_hand_eye.py` if needed
 
 ## Topics Reference
 
@@ -196,10 +210,10 @@ ros2 topic echo /vlm_center_position
 ## Next Steps
 
 1. **Test the new architecture** - Run test_depth_center_pixel.py first
-2. **Change models** - Edit `config.yaml` to try different LLM/VLM models
+2. **Verify calibration** - If positions are inaccurate, run `python3 calibrate_hand_eye.py`
+3. **Change models** - Edit `config.yaml` to try different LLM/VLM models
    - Pull new models: `ollama pull llama3.2:3b` or `ollama pull llava:13b`
-3. **Motion integration** - Connect motion planner to use VLM position
-4. **TF transforms** - Add camera→robot frame transformation
+4. **Motion integration** - Test full pick/place pipeline (see test_full_pick.md)
 5. **Better VLM models** - Try Qwen-VL or Florence-2 for improved scene understanding
 6. **Multi-point sampling** - Extend beyond center pixel if needed
 

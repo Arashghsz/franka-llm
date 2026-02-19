@@ -20,6 +20,7 @@ setup(
         'console_scripts': [
             'coordinator_node=franka_coordinator.coordinator_node:main',
             'web_handler=franka_coordinator.web_handler:main',
+            'test_coordinate_transform=franka_coordinator.test_coordinate_transform:main',
         ],
     },
 )

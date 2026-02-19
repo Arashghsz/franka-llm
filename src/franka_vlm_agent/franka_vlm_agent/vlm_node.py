@@ -157,6 +157,8 @@ class VLMNode(Node):
         """Setup ROS publishers"""
         self.explanation_pub = self.create_publisher(String, '/vlm/explanation', 10)
         self.position_pub = self.create_publisher(PoseStamped, '/vlm_center_position', 10)
+        # NEW: Publish grounding info with bbox for coordinator
+        self.grounding_pub = self.create_publisher(String, '/vlm_grounding', 10)
     
     def _image_callback(self, msg: Image):
         """Handle raw image messages"""
@@ -305,6 +307,8 @@ class VLMNode(Node):
                 
                 if position_3d:
                     self._publish_position(position_3d)
+                    # NEW: Publish grounding with bbox for coordinator
+                    self._publish_grounding(target_object, center, 'pick')
             else:
                 self.get_logger().warn(f'✗ Could not locate "{target_object}"')
                 self._publish_explanation(f'Object "{target_object}" not found')
@@ -357,6 +361,30 @@ class VLMNode(Node):
         pose_msg.pose.orientation.w = 1.0
         
         self.position_pub.publish(pose_msg)
+    
+    def _publish_grounding(self, target_name: str, center: list, action: str):
+        """Publish grounding info with bbox around center pixel for coordinator"""
+        # Create a small bbox around the center (±20 pixels)
+        bbox_size = 40
+        x1 = max(0, center[0] - bbox_size // 2)
+        y1 = max(0, center[1] - bbox_size // 2)
+        x2 = center[0] + bbox_size // 2
+        y2 = center[1] + bbox_size // 2
+        
+        grounding_data = {
+            "target": target_name,
+            "bbox": [x1, y1, x2, y2],
+            "center": center,
+            "action": action
+        }
+        
+        msg = String()
+        msg.data = json.dumps(grounding_data)
+        self.grounding_pub.publish(msg)
+        
+        self.get_logger().info(
+            f'📤 Published grounding: {target_name} bbox=[{x1},{y1},{x2},{y2}] → /vlm_grounding'
+        )
 
 
 def main(args=None):
