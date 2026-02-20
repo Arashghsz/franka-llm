@@ -13,4 +13,4 @@ This is **NOT** the **active development branch**.
 
 After reaching a milestone, a new branch will be created from that point to preserve the state, and development continues here.
 
-For detailed setup and usage instructions, see [QUICKSTART.md](QUICKSTART.md).
+For detailed setup and usage instructions, see **main** branch.
