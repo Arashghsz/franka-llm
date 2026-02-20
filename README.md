@@ -1,13 +1,9 @@
-# Franka LLM - Active Development Branch
+# Franka LLM - reference Branch
 
 This is **NOT** the **active development branch**.
 
-## Branch Structure
+**This branch is archived for reference purposes.**
 
-- **`main`** - Stable baseline for milestone releases
-- **`dev`** - Active development (current branch)
-- **`demo-roel-feb11-2026`** - Demo version shown to supervisor Roel on Feb 11, 2026
-- **`demo-roel-feb20-2026`** - Demo version shown to supervisor Roel on Feb 20, 2026
 
 ## Workflow
 
