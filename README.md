@@ -1,6 +1,6 @@
 # Franka LLM - Demo Version (Feb 11, 2026)
 
-This branch preserves the **demo state shown to supervisor Roel on February 11, 2026**.
+This branch preserves the **demo state shown to Roel on February 11, 2026**.
 
 ## About This Branch
 
@@ -10,4 +10,4 @@ This is a snapshot of the project at a specific milestone. It includes VLM to de
 
 For active development, see the `dev` branch.
 
-For detailed setup and usage instructions, see [QUICKSTART.md](QUICKSTART.md).
+For detailed setup and usage instructions, see the **main** branch
