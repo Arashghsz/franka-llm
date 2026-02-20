@@ -131,8 +131,43 @@ You should see:
 - ✅ Status cards showing system state
 
 ---
+### Terminal 9 - Coordinator (Coordinate Transform)
+```bash
+cd ~/franka-llm
+source install/setup.zsh
+ros2 run franka_coordinator coordinator_node
+```
 
-## 💬 Usage Examples
+### Terminal 10 - Motion Executor
+```bash
+cd ~/franka-llm
+source install/setup.zsh
+ros2 run franka_motion_executor motion_executor
+```
+
+### Terminal 10 - Moveit launch
+```bash
+cd ~/franka_ros2_ws && source install/setup.zsh && ros2 launch franka_fr3_moveit_config moveit.launch.py robot_ip:=172.16.0.2 use_fake_hardwar:=false
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ### Example 1: Scene Inspection with Image
 

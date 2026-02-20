@@ -46,18 +46,22 @@ print("new cashed code")
 
 # manip.move_to_joints(new_home, velocity_scaling=0.8)
 # time.sleep(1)
-# manip.open_gripper(width=0.08)
+# manip.open_gripper(width=0.03)
 # manip.move_home()
+# manip.open_gripper(width=0.08)
 
 # # Move to position - defaults handle gripper-down orientation
 # manip.move_to_position(0.282, 0.136, 0.25, velocity_scaling=0.1)
+# manip.open_gripper(width=0.03)
 # time.sleep(1)
-# manip.move_to_position(0.4, 0, 0.65, velocity_scaling=0.1)
-# time.sleep(1)
+manip.move_to_position(0.6, 0, 0.55, velocity_scaling=0.6)
+
+time.sleep(3)
+manip.open_gripper(width=0.08)
+
 manip.move_home()
 # time.sleep(1)
 # # manip.move_to_position(0.6, 0, 0.14, velocity_scaling=0.1)
-# # manip.open_gripper(width=0.03)
 # manip.move_home()
 
 # current_joints = helper.get_current_joints()

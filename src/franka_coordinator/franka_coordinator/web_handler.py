@@ -471,42 +471,34 @@ class WebHandler(Node):
         try:
             if not self.debug_images_dir.exists():
                 return None
-            
-            # Get all image files
             image_files = list(self.debug_images_dir.glob('*.jpg'))
-            
             if not image_files:
                 return None
-            
-            # If object name specified, try to find matching image
+            latest_file = None
+            # If object_name specified, try to find the most recent matching image
             if object_name:
-                # Normalize object name for matching
                 normalized_name = object_name.lower().replace(' ', '_')
-                matching_files = [
-                    f for f in image_files 
-                    if normalized_name in f.name.lower()
-                ]
+                # Find all files containing the normalized name
+                matching_files = [f for f in image_files if normalized_name in f.name.lower()]
                 if matching_files:
-                    # Get most recent matching file
+                    # Pick the most recent matching file
                     latest_file = max(matching_files, key=lambda f: f.stat().st_mtime)
-                else:
-                    # Fall back to most recent image
-                    latest_file = max(image_files, key=lambda f: f.stat().st_mtime)
-            else:
-                # Get most recent image
+            # If no match or no object_name, and specifically for scene_description, try to get the most recent scene_description image
+            if object_name == 'scene_description' and (not latest_file):
+                scene_files = [f for f in image_files if 'scene_description' in f.name.lower()]
+                if scene_files:
+                    latest_file = max(scene_files, key=lambda f: f.stat().st_mtime)
+            # Fallback: just get the most recent image
+            if not latest_file:
                 latest_file = max(image_files, key=lambda f: f.stat().st_mtime)
-            
             # Read and encode as base64
             with open(latest_file, 'rb') as f:
                 image_data = f.read()
                 if not image_data:
                     self.get_logger().error(f'Empty image file: {latest_file.name}')
                     return None
-                    
                 image_base64 = base64.b64encode(image_data).decode('utf-8')
                 data_url = f'data:image/jpeg;base64,{image_base64}'
-                
-                # Detailed logging
                 self.get_logger().info(
                     f'Image encoding complete:\n'
                     f'  File: {latest_file.name}\n'
