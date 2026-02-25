@@ -1,14 +1,58 @@
-This section should cover some plots from the chatbot itself and some from a different POV of the robot arm.
+This section presents a comprehensive evaluation of the Franka LLM system through quantitative performance metrics, user studies, and challenging real-world scenarios. Our evaluation methodology combines technical benchmarking with human-robot interaction assessment to validate both system capabilities and user experience.
 
-\item Success rate
-\item Compute time
-\item End-to-end latency
-\item A challenging prompt—e.g., Pick up the metallic tool specifically designed for driving or tightening screws.
-\item A single prompt for 5 times for 5 different objects (25 prompts total)
+\subsection{Performance Evaluation Protocol}
 
+We evaluate our system across multiple dimensions to ensure robust validation:
 
-objects:
+\begin{itemize}
+\item \textbf{Success rate analysis}: Measured across 20? pick-and-place trials
+\item \textbf{Temporal performance}: End-to-end latency from natural language input to task completion
+\item \textbf{Component timing breakdown}: Individual analysis of LLM processing on Jetson AGX Orin, vision detection, and motion execution phases
+\item \textbf{Complex linguistic understanding}: Evaluation using challenging prompts such as \textit{"Pick up the metallic tool specifically designed for driving or tightening screws"}
+\item \textbf{Repeatability assessment}: Consistency testing through 5 repeated trials across 5 different objects (25 total evaluations)
+\end{itemize}
 
-\item Single object
-\item Multiple objects
-\item Overlapping objects
+\subsection{Spatial Reasoning and Multi-Object Scenarios}
+
+To assess the system's spatial understanding and multi-object manipulation capabilities:
+
+\begin{itemize}
+\item \textbf{Single object manipulation}: Baseline performance with isolated objects
+\item \textbf{Multi-object selection}: Disambiguation between multiple visible objects (\textit{"pick the red cube, not the blue one"})
+\item \textbf{Complex spatial relationships}: Advanced spatial reasoning tasks (\textit{"place the red cube to the left of the blue one"})
+\item \textbf{Overlapping object challenges}: Performance degradation analysis in cluttered environments
+\item \textbf{Relative positioning tasks}: Evaluation of spatial preposition understanding (above, below, beside, between)
+\end{itemize}
+
+\subsection{Human Subject Evaluation}
+
+We evaluate system usability through a user study with 12? participants (4 novice, 4 intermediate, 4 expert users):
+
+\begin{itemize}
+\item \textbf{Performance metrics}: Task success rate and completion time
+\item \textbf{Usability survey}: System Usability Scale (SUS) questionnaire (need to design the survey if we want to include this)
+\item \textbf{Baseline comparison}: Natural language interface vs. traditional robot control
+\item \textbf{User feedback}: Post-task interviews on system transparency and trust (need to design interview questions if we want to include this)
+\end{itemize}
+
+\subsection{Statistical Analysis}
+
+We ensure reliable results through:
+
+\begin{itemize}
+\item \textbf{Adequate sample sizes}: Sufficient trials for meaningful statistical analysis
+\item \textbf{Error reporting}: Confidence intervals for all performance metrics
+\item \textbf{Significance testing}: Standard statistical tests (t-tests, ANOVA) where appropriate
+\end{itemize}
+
+\subsection{Distributed System Performance}
+
+We evaluate the distributed architecture's effectiveness across hardware components:
+
+\begin{itemize}
+\item \textbf{Network latency analysis}: ROS2 topic communication delays on Jetson AGX Orin
+\item \textbf{Local inference performance}: LLM processing times on dedicated Jetson hardware  
+\item \textbf{Offline operation validation}: System functionality without external network dependencies
+\item \textbf{Multi-device coordination}: Synchronization effectiveness across distributed nodes
+\item \textbf{Resource utilization}: CPU, GPU, and memory usage on Jetson during inference tasks
+\end{itemize}
