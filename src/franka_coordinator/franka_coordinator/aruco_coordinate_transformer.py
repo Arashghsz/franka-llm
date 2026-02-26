@@ -1,44 +1,45 @@
 #!/usr/bin/env python3
 """
-Coordinate Transformation Utility for Franka LLM Pipeline
-Based on friend's coordinate_computer.py implementation
-Handles pixel → 3D camera frame → robot base frame transformations
+ArUco Calibration-Based Coordinate Transformer
+Replaces TF2-based transformation with direct ArUco marker calibration
 """
 
+import pickle
 import numpy as np
 from typing import Optional, Tuple
-import rclpy
+from scipy.spatial.transform import Rotation as R
 from rclpy.node import Node
-from geometry_msgs.msg import PointStamped
 from sensor_msgs.msg import CameraInfo
-from tf2_ros import Buffer, TransformListener
-import tf2_geometry_msgs
+import os
 
 
-class CoordinateTransformer:
+class ArucoCoordinateTransformer:
     """
-    Transforms coordinates between pixel space, camera frame, and robot frame.
+    Transforms coordinates using ArUco marker calibration.
+    Replaces the old TF2-based CoordinateTransformer.
     
     Usage:
-        transformer = CoordinateTransformer(node, robot_frame='panda_link0', camera_frame='camera_color_optical_frame')
+        transformer = ArucoCoordinateTransformer(node, calibration_dir='/path/to/calibration')
         point_robot = transformer.pixel_to_robot_frame(pixel_x=320, pixel_y=240, depth_m=0.5)
     """
     
     def __init__(self, 
                  node: Node,
-                 robot_frame: str = 'fr3_link0',
-                 camera_frame: str = 'ee_d435i_color_optical_frame'):
+                 calibration_dir: str = None,
+                 robot_offset_x: float = 0.48,
+                 robot_offset_z: float = 0.02):
         """
-        Initialize coordinate transformer.
+        Initialize ArUco-based coordinate transformer.
         
         Args:
-            node: ROS 2 node for logging and TF
-            robot_frame: Robot base frame name (default: fr3_link0 for Franka FR3)
-            camera_frame: Camera optical frame name (default: ee_d435i_color_optical_frame)
+            node: ROS 2 node for logging
+            calibration_dir: Directory containing rotation_vector.pkl and translational_vector.pkl
+            robot_offset_x: X offset for robot calibration (default: 0.48m)
+            robot_offset_z: Z offset for robot calibration (default: 0.02m)
         """
         self.node = node
-        self.robot_frame = robot_frame
-        self.camera_frame = camera_frame
+        self.robot_offset_x = robot_offset_x
+        self.robot_offset_z = robot_offset_z
         
         # Camera intrinsics (will be set from CameraInfo)
         self.fx = None
@@ -48,12 +49,59 @@ class CoordinateTransformer:
         self.width = None
         self.height = None
         
-        # TF2 for frame transformations
-        self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, node)
+        # Determine calibration directory
+        if calibration_dir is None:
+            # Default to new_calibration directory
+            pkg_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            calibration_dir = os.path.join(pkg_dir, 'realsense_cameras', 'new_calibration')
+            # If the derived path doesn't exist (e.g. running from install/),
+            # fall back to the known absolute source location
+            if not os.path.isdir(calibration_dir):
+                calibration_dir = '/home/arash/franka-llm/src/realsense_cameras/new_calibration'
+        
+        self.calibration_dir = calibration_dir
+        
+        # Load calibration data
+        self._load_calibration()
         
         self.node.get_logger().info(
-            f'Coordinate Transformer initialized: {camera_frame} → {robot_frame}'
+            f'✅ ArUco Coordinate Transformer initialized'
+        )
+        self.node.get_logger().info(
+            f'   Calibration dir: {calibration_dir}'
+        )
+        self.node.get_logger().info(
+            f'   Robot offsets: X={robot_offset_x}m, Z={robot_offset_z}m'
+        )
+    
+    def _load_calibration(self):
+        """Load rotation and translation vectors from pickle files"""
+        rotation_path = os.path.join(self.calibration_dir, 'rotation_vector.pkl')
+        translation_path = os.path.join(self.calibration_dir, 'translational_vector.pkl')
+        
+        if not os.path.exists(rotation_path):
+            raise FileNotFoundError(f'Rotation vector not found: {rotation_path}')
+        if not os.path.exists(translation_path):
+            raise FileNotFoundError(f'Translation vector not found: {translation_path}')
+        
+        with open(rotation_path, 'rb') as f:
+            self.rotation_vector = pickle.load(f)
+        
+        with open(translation_path, 'rb') as f:
+            self.translation_vector = pickle.load(f)
+        
+        # Compute transformation matrices
+        # R_cam_aruco: Rotation from ArUco to camera frame
+        self.R_cam_aruco = R.from_rotvec(self.rotation_vector.squeeze()).as_matrix()
+        
+        # R_aruco_cam: Inverse rotation (camera to ArUco)
+        self.R_aruco_cam = self.R_cam_aruco.T
+        
+        # t_aruco_cam: Translation from ArUco to camera
+        self.t_aruco_cam = -self.R_aruco_cam @ self.translation_vector.squeeze()
+        
+        self.node.get_logger().info(
+            f'   Calibration loaded: rotation shape={self.rotation_vector.shape}'
         )
     
     def update_camera_intrinsics(self, camera_info: CameraInfo):
@@ -81,7 +129,7 @@ class CoordinateTransformer:
                               depth_m: float) -> Optional[np.ndarray]:
         """
         Convert pixel coordinates + depth to 3D point in camera frame.
-        Uses pinhole camera model (same as pyrealsense2's rs2_deproject_pixel_to_point).
+        Uses pinhole camera model.
         
         Args:
             pixel_u: Horizontal pixel coordinate (x, column)
@@ -103,8 +151,7 @@ class CoordinateTransformer:
         pixel_u = max(0, min(pixel_u, self.width - 1))
         pixel_v = max(0, min(pixel_v, self.height - 1))
         
-        # Pinhole camera model (Brown-Conrady for RealSense)
-        # This matches rs2.rs2_deproject_pixel_to_point() behavior
+        # Pinhole camera model
         x_cam = (pixel_u - self.ppx) * depth_m / self.fx
         y_cam = (pixel_v - self.ppy) * depth_m / self.fy
         z_cam = depth_m
@@ -119,66 +166,42 @@ class CoordinateTransformer:
         return point_cam
     
     def camera_frame_to_robot_frame(self, 
-                                     point_camera: np.ndarray,
-                                     timeout_sec: float = 1.0) -> Optional[np.ndarray]:
+                                     point_camera: np.ndarray) -> Optional[np.ndarray]:
         """
-        Transform 3D point from camera frame to robot base frame using TF2.
+        Transform 3D point from camera frame to robot base frame using ArUco calibration.
         
         Args:
             point_camera: 3D point [x, y, z] in camera frame (meters)
-            timeout_sec: TF lookup timeout (default: 1.0 second)
             
         Returns:
-            3D point [x, y, z] in robot frame (meters), or None if transform unavailable
+            3D point [x, y, z] in robot frame (meters), or None if invalid
         """
         if point_camera is None or len(point_camera) != 3:
             return None
         
-        try:
-            # Create PointStamped in camera frame
-            point_stamped = PointStamped()
-            point_stamped.header.frame_id = self.camera_frame
-            point_stamped.header.stamp = self.node.get_clock().now().to_msg()
-            point_stamped.point.x = float(point_camera[0])
-            point_stamped.point.y = float(point_camera[1])
-            point_stamped.point.z = float(point_camera[2])
-            
-            # Lookup transform (camera → robot)
-            transform = self.tf_buffer.lookup_transform(
-                self.robot_frame,
-                self.camera_frame,
-                rclpy.time.Time(),  # Latest available transform
-                timeout=rclpy.duration.Duration(seconds=timeout_sec)
-            )
-            
-            # Apply transform
-            point_robot_stamped = tf2_geometry_msgs.do_transform_point(point_stamped, transform)
-            
-            point_robot = np.array([
-                point_robot_stamped.point.x,
-                point_robot_stamped.point.y,
-                point_robot_stamped.point.z
-            ], dtype=np.float64)
-            
-            self.node.get_logger().debug(
-                f'Camera [{point_camera[0]:.3f}, {point_camera[1]:.3f}, {point_camera[2]:.3f}] → '
-                f'Robot [{point_robot[0]:.3f}, {point_robot[1]:.3f}, {point_robot[2]:.3f}]'
-            )
-            
-            return point_robot
-            
-        except Exception as e:
-            self.node.get_logger().error(f'TF lookup failed: {e}')
-            self.node.get_logger().error(
-                f'Make sure camera TF is published! Check: ros2 run tf2_ros tf2_echo {self.robot_frame} {self.camera_frame}'
-            )
-            return None
+        # Transform to ArUco frame
+        point_aruco = self.R_aruco_cam @ point_camera + self.t_aruco_cam
+        
+        # Transform to robot frame
+        # Based on calibration: robot frame is offset from ArUco marker
+        robot_x = -point_aruco[1] + self.robot_offset_x
+        robot_y = -point_aruco[0] - 0.01
+        robot_z = point_aruco[2] + self.robot_offset_z
+        
+        point_robot = np.array([robot_x, robot_y, robot_z], dtype=np.float64)
+        
+        self.node.get_logger().debug(
+            f'Camera [{point_camera[0]:.3f}, {point_camera[1]:.3f}, {point_camera[2]:.3f}] → '
+            f'ArUco [{point_aruco[0]:.3f}, {point_aruco[1]:.3f}, {point_aruco[2]:.3f}] → '
+            f'Robot [{robot_x:.3f}, {robot_y:.3f}, {robot_z:.3f}]'
+        )
+        
+        return point_robot
     
     def pixel_to_robot_frame(self,
                              pixel_u: int,
                              pixel_v: int,
-                             depth_m: float,
-                             timeout_sec: float = 1.0) -> Optional[np.ndarray]:
+                             depth_m: float) -> Optional[np.ndarray]:
         """
         One-step conversion: pixel + depth → robot frame coordinates.
         
@@ -186,7 +209,6 @@ class CoordinateTransformer:
             pixel_u: Horizontal pixel coordinate
             pixel_v: Vertical pixel coordinate
             depth_m: Depth in meters
-            timeout_sec: TF lookup timeout
             
         Returns:
             3D point [x, y, z] in robot frame, or None if conversion fails
@@ -197,7 +219,7 @@ class CoordinateTransformer:
             return None
         
         # Step 2: Camera frame → Robot frame
-        point_robot = self.camera_frame_to_robot_frame(point_camera, timeout_sec)
+        point_robot = self.camera_frame_to_robot_frame(point_camera)
         
         if point_robot is not None:
             self.node.get_logger().info(
@@ -265,46 +287,3 @@ class CoordinateTransformer:
         
         # Convert to robot frame
         return self.pixel_to_robot_frame(cx, cy, depth_m)
-    
-    def robot_frame_to_camera_frame(self,
-                                     point_robot: np.ndarray,
-                                     timeout_sec: float = 1.0) -> Optional[np.ndarray]:
-        """
-        Inverse transform: robot frame → camera frame.
-        
-        Args:
-            point_robot: 3D point in robot frame
-            timeout_sec: TF lookup timeout
-            
-        Returns:
-            3D point in camera frame, or None if unavailable
-        """
-        if point_robot is None or len(point_robot) != 3:
-            return None
-        
-        try:
-            point_stamped = PointStamped()
-            point_stamped.header.frame_id = self.robot_frame
-            point_stamped.header.stamp = self.node.get_clock().now().to_msg()
-            point_stamped.point.x = float(point_robot[0])
-            point_stamped.point.y = float(point_robot[1])
-            point_stamped.point.z = float(point_robot[2])
-            
-            transform = self.tf_buffer.lookup_transform(
-                self.camera_frame,
-                self.robot_frame,
-                rclpy.time.Time(),
-                timeout=rclpy.duration.Duration(seconds=timeout_sec)
-            )
-            
-            point_camera_stamped = tf2_geometry_msgs.do_transform_point(point_stamped, transform)
-            
-            return np.array([
-                point_camera_stamped.point.x,
-                point_camera_stamped.point.y,
-                point_camera_stamped.point.z
-            ], dtype=np.float64)
-            
-        except Exception as e:
-            self.node.get_logger().error(f'Inverse TF lookup failed: {e}')
-            return None

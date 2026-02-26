@@ -12,6 +12,8 @@ Handles:
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
+from sensor_msgs.msg import CameraInfo
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 import json
 from datetime import datetime
 from threading import Lock
@@ -32,12 +34,29 @@ class WebHandler(Node):
             'robot_state': 'Disconnected',
             'vision_state': 'Offline',
             'llm_state': 'Offline',
+            'coordinator_state': 'Offline',
+            'motion_state': 'Idle',
+            'camera_state': 'Offline',
             'bridge_state': 'Online',
+            'last_detection': 'None',
+            'last_action': 'None',
             'timestamp': datetime.now().isoformat()
         }
+        # Per-component last-seen timestamps for staleness detection
+        self._last_seen = {
+            'llm': None,
+            'vlm': None,
+            'coordinator': None,
+            'motion': None,
+            'camera': None,
+        }
+        # Counter for periodic node-graph check (every 5s)
+        self._node_check_counter = 0
         
         # Pending motion confirmation state
         self.pending_motion = None
+        self.latest_robot_position = None  # Cached robot-frame coords from coordinator
+        self.confirmation_pending = False  # Waiting for position before showing confirmation
         self.vlm_model_name = 'VLM'  # Default, updated from system info
         self.llm_model_name = 'LLM'  # Default, updated from system info
         
@@ -110,7 +129,25 @@ class WebHandler(Node):
         self.vision_sub = self.create_subscription(
             String, '/vision/detections', self.handle_vision_data, 10
         )
+
+        # Subscriber to robot-frame position info from coordinator
+        self.target_position_info_sub = self.create_subscription(
+            String, '/target_position_info', self.handle_target_position_info, 10
+        )
         
+        # Camera info subscription — BEST_EFFORT QoS to match RealSense
+        _cam_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+        self.camera_info_sub = self.create_subscription(
+            CameraInfo,
+            '/cameras/ee/ee_camera/color/camera_info',
+            self.handle_camera_info,
+            _cam_qos
+        )
+
         # Timer to publish status updates periodically
         self.status_timer = self.create_timer(1.0, self.publish_web_status)
         
@@ -150,36 +187,17 @@ class WebHandler(Node):
             llm_cfg = self.system_config.get('llm', {})
             vlm_cfg = self.system_config.get('vlm', {})
             
-            config_text = f"""**Hello! I'm Franka Assistant**, your intelligent robot coordinator.
-
-**System Configuration:**
-
-🧠 **LLM Coordinator**
-• Model: {llm_cfg.get('model', 'Not configured')}
-• Temperature: {llm_cfg.get('temperature', 'N/A')}
-• Timeout: {llm_cfg.get('timeout', 'N/A')}s
-
-🔍 **Vision Agent (VLM)**
-• Model: {vlm_cfg.get('model', 'Not configured')}
-• Temperature: {vlm_cfg.get('temperature', 'N/A')}
-• Timeout: {vlm_cfg.get('timeout', 'N/A')}s
-
-📷 **Camera System**
-• RealSense D435i
-• Resolution: 640x480
-• FPS: 30
-
-✨ **I can help you with:**
-• Scene understanding and object detection
-• Natural language motion planning
-• Real-time visual feedback
-• Interactive motion approval
-
-💡 **Tip:** All actions require your approval before execution."""
+            config_text = (
+                f"👋 Welcome! I\'m your Franka robot assistant."
+                f"I'm running **{llm_cfg.get('model', 'an LLM')}** as my language brain and "
+                f"**{vlm_cfg.get('model', 'a VLM')}** as my vision system, paired with a RealSense D435i camera. "
+                f"Tell me what you'd like to do — I can look at the scene, find objects, plan motions, and move the robot. "
+                f"I'll always ask for your approval before executing anything."
+            )
             
             welcome_message = {
                 'type': 'message',
-                'sender': 'system',
+                'sender': 'robot',
                 'agent_name': 'Franka Assistant',
                 'message': config_text,
                 'timestamp': datetime.now().isoformat()
@@ -230,6 +248,7 @@ class WebHandler(Node):
             # Update LLM state as online
             with self.status_lock:
                 self.status_cache['llm_state'] = 'Online'
+                self._last_seen['llm'] = datetime.now()
             
             # Check if this is system info
             if response_text.startswith('{'):
@@ -286,7 +305,7 @@ class WebHandler(Node):
             # Update vision state as online
             with self.status_lock:
                 self.status_cache['vision_state'] = 'Online'
-            
+                self._last_seen['vlm'] = datetime.now()            
             # Check if this is system info
             try:
                 info = json.loads(explanation)
@@ -312,7 +331,11 @@ class WebHandler(Node):
                     confidence = detection_data.get('confidence', 'unknown')
                     
                     if center and len(center) == 2:
-                        formatted_message = f"**Object Located**\n\n{description}\n\n**Position:** Pixel ({center[0]}, {center[1]})\n**Confidence:** {confidence}"
+                        formatted_message = (
+                            f"**Object detected** — {description}\n\n"
+                            f"**Pixel:** ({center[0]}, {center[1]})  "
+                            f"**Confidence:** {confidence}"
+                        )
                     else:
                         formatted_message = f"**Detection Result**\n\n{description}\n\n**Confidence:** {confidence}"
                 
@@ -359,31 +382,57 @@ class WebHandler(Node):
             
             self.get_logger().info(f'VLM grounding: {target} at {center}')
             
-            # Store this for motion confirmation
+            # Store for motion confirmation
             self.pending_motion = {
                 'target': target,
                 'action': action,
                 'bbox': bbox,
                 'center': center
             }
+            # Reset position so we don't show stale coords from previous detection
+            self.latest_robot_position = None
+            self.confirmation_pending = True
             
-            # Send planning message
-            self._send_log_message('Motion Planner', 'Analyzing approach path...')
+            with self.status_lock:
+                self.status_cache['last_detection'] = f'{target} @ {datetime.now().strftime("%H:%M:%S")}'
             
-            # Now request confirmation from user for motion execution (inline, not modal)
-            self._request_motion_confirmation(target, action)
+            self._send_log_message('Motion Planner', 'Computing robot-frame position...')
+            
+            # Wait up to 1.5s for coordinator to publish robot position, then send confirmation
+            self.create_timer(1.5, self._send_confirmation_once)
             
         except Exception as e:
             self.get_logger().error(f'Error handling VLM grounding: {e}')
+
+    def _send_confirmation_once(self):
+        """Send confirmation if still pending (fallback if position_info never arrived)."""
+        if self.confirmation_pending and self.pending_motion:
+            self.confirmation_pending = False
+            pm = self.pending_motion
+            self._request_motion_confirmation(pm['target'], pm['action'])
     
     def _request_motion_confirmation(self, target: str, action: str):
         """Request user confirmation before executing motion."""
         try:
+            rp = self.latest_robot_position
+            if rp:
+                position_line = (
+                    f"\n• Position: X={rp['x']:+.3f} m, Y={rp['y']:+.3f} m, Z={rp['z']:+.3f} m"
+                )
+            else:
+                position_line = ''
+            
             confirmation_message = {
                 'type': 'confirmation_request',
                 'sender': 'system',
                 'agent_name': '⚙️ Motion Controller',
-                'message': f'Ready to execute: **{action} {target}**\n\n📋 Action plan:\n• Approach object at detected location\n• Execute {action} maneuver\n• Return to safe position',
+                'message': (
+                    f'Ready to execute: **{action} {target}**\n\n'
+                    f'📋 Action plan:\n'
+                    f'• Approach object at detected location{position_line}\n'
+                    f'• Execute {action} maneuver\n'
+                    f'• Return to safe position'
+                ),
                 'action': action,
                 'target': target,
                 'timestamp': datetime.now().isoformat()
@@ -398,6 +447,38 @@ class WebHandler(Node):
         except Exception as e:
             self.get_logger().error(f'Error requesting confirmation: {e}')
     
+    def handle_target_position_info(self, msg: String):
+        """Cache robot-frame position; if confirmation is still pending, send it now with coords."""
+        try:
+            self.latest_robot_position = json.loads(msg.data)
+            rp = self.latest_robot_position
+            self.get_logger().info(
+                f'Robot position cached: '
+                f'X={rp["x"]:+.3f} Y={rp["y"]:+.3f} Z={rp["z"]:+.3f}'
+            )
+            # Send robot-frame coords as a chat log — timing-independent
+            pos_message = {
+                'type': 'log',
+                'sender': 'system',
+                'agent_name': '\U0001f4cd Robot Position',
+                'message': (
+                    f"**{rp['target']} \u2192 Robot Base Frame (fr3_link0):**\n"
+                    f"\u2022 X: {rp['x']:+.3f} m  ({'forward' if rp['x'] > 0 else 'backward'})\n"
+                    f"\u2022 Y: {rp['y']:+.3f} m  ({'left' if rp['y'] > 0 else 'right'})\n"
+                    f"\u2022 Z: {rp['z']:+.3f} m  (height)"
+                ),
+                'timestamp': datetime.now().isoformat()
+            }
+            self.web_response_pub.publish(String(data=json.dumps(pos_message)))
+            
+            # If confirmation is still waiting, send it now with position included
+            if self.confirmation_pending and self.pending_motion:
+                self.confirmation_pending = False
+                pm = self.pending_motion
+                self._request_motion_confirmation(pm['target'], pm['action'])
+        except Exception as e:
+            self.get_logger().error(f'Error caching robot position: {e}')
+
     def _send_log_message(self, agent_name: str, message: str):
         """Send a log message to the chat."""
         try:
@@ -437,6 +518,10 @@ class WebHandler(Node):
             
             # Send feedback to web
             if confirmed:
+                with self.status_lock:
+                    self.status_cache['last_action'] = (
+                        f'{self.pending_motion.get("action","?")} {self.pending_motion.get("target","?")}'
+                    )
                 web_message = {
                     'type': 'message',
                     'sender': 'system',
@@ -491,21 +576,32 @@ class WebHandler(Node):
             # Fallback: just get the most recent image
             if not latest_file:
                 latest_file = max(image_files, key=lambda f: f.stat().st_mtime)
-            # Read and encode as base64
+            # Read and encode as base64 (resize for web to keep message small)
             with open(latest_file, 'rb') as f:
                 image_data = f.read()
                 if not image_data:
                     self.get_logger().error(f'Empty image file: {latest_file.name}')
                     return None
+                # Resize to max 640px wide to avoid ROSBridge message size limits
+                import numpy as np
+                import cv2 as _cv2
+                nparr = np.frombuffer(image_data, np.uint8)
+                img = _cv2.imdecode(nparr, _cv2.IMREAD_COLOR)
+                if img is not None:
+                    h, w = img.shape[:2]
+                    max_w = 640
+                    if w > max_w:
+                        scale = max_w / w
+                        img = _cv2.resize(img, (max_w, int(h * scale)), interpolation=_cv2.INTER_AREA)
+                    _, buf = _cv2.imencode('.jpg', img, [_cv2.IMWRITE_JPEG_QUALITY, 80])
+                    image_data = buf.tobytes()
                 image_base64 = base64.b64encode(image_data).decode('utf-8')
                 data_url = f'data:image/jpeg;base64,{image_base64}'
                 self.get_logger().info(
                     f'Image encoding complete:\n'
                     f'  File: {latest_file.name}\n'
-                    f'  Raw bytes: {len(image_data)}\n'
                     f'  Base64 length: {len(image_base64)}\n'
-                    f'  Data URL length: {len(data_url)}\n'
-                    f'  First 50 chars: {data_url[:50]}'
+                    f'  Data URL length: {len(data_url)}'
                 )
                 return data_url
             
@@ -517,16 +613,35 @@ class WebHandler(Node):
         """Handle status updates from coordinator."""
         try:
             status = json.loads(msg.data)
-            
+            now = datetime.now()
+
             with self.status_lock:
                 self.status_cache['robot_state'] = status.get('robot_state', 'Unknown').title()
-                self.status_cache['vision_state'] = status.get('vision_state', 'Unknown').title()
-                self.status_cache['llm_state'] = status.get('llm_state', 'Unknown').title()
+                self.status_cache['coordinator_state'] = 'Online'
                 self.status_cache['bridge_state'] = 'Online'
-                self.status_cache['timestamp'] = status.get('timestamp', datetime.now().isoformat())
-            
+                self.status_cache['timestamp'] = status.get('timestamp', now.isoformat())
+                self._last_seen['coordinator'] = now
+
+                # Propagate llm/vision state from coordinator — and keep staleness
+                # tracking in sync so the staleness check doesn't immediately wipe them
+                raw_llm = status.get('llm_state', 'offline').lower()
+                raw_vis = status.get('vision_state', 'offline').lower()
+
+                if raw_llm == 'online':
+                    self.status_cache['llm_state'] = 'Online'
+                    self._last_seen['llm'] = now
+                elif self.status_cache.get('llm_state') != 'Online':
+                    # Only overwrite if not already shown as online by handle_coordinator_response
+                    self.status_cache['llm_state'] = raw_llm.title()
+
+                if raw_vis == 'online':
+                    self.status_cache['vision_state'] = 'Online'
+                    self._last_seen['vlm'] = now
+                elif self.status_cache.get('vision_state') != 'Online':
+                    self.status_cache['vision_state'] = raw_vis.title()
+
             self.get_logger().debug(f'Status updated: {self.status_cache}')
-            
+
         except Exception as e:
             self.get_logger().error(f'Error handling coordinator status: {e}')
     
@@ -552,33 +667,50 @@ class WebHandler(Node):
             self.get_logger().error(f'Error handling LLM response: {e}')
     
     def handle_motion_status(self, msg: String):
-        """Forward motion status to web dashboard."""
+        """Forward motion status to web dashboard and update status cache."""
         try:
             status = json.loads(msg.data)
             status_text = status.get('status', 'Unknown')
-            
+
+            # Map ROS status strings to display labels
+            display_map = {
+                'completed':  'Completed',
+                'failed':     'Failed',
+                'executing':  'Executing',
+                'planning':   'Planning',
+                'approaching':'Approaching',
+                'idle':       'Idle',
+            }
+            display_state = display_map.get(status_text.lower(), status_text.title())
+
+            # Update status panel
+            with self.status_lock:
+                self.status_cache['motion_state'] = display_state
+                self._last_seen['motion'] = datetime.now()
+                if status_text == 'completed':
+                    self.status_cache['last_action'] = f'Completed at {datetime.now().strftime("%H:%M:%S")}'
+
             if status_text == 'completed':
-                message = f'✓ Motion sequence completed successfully'
+                message = '✓ Motion sequence completed successfully'
                 msg_type = 'message'
-                # Clear pending motion on completion
                 self.pending_motion = None
             elif status_text == 'failed':
                 message = f'✗ Motion failed: {status.get("error", "Unknown error")}'
                 msg_type = 'message'
                 self.pending_motion = None
             elif status_text == 'executing':
-                message = f'Executing motion sequence...'
+                message = 'Executing motion sequence...'
                 msg_type = 'log'
             elif status_text == 'planning':
-                message = f'Planning trajectory...'
+                message = 'Planning trajectory...'
                 msg_type = 'log'
             elif status_text == 'approaching':
-                message = f'Moving to approach position...'
+                message = 'Moving to approach position...'
                 msg_type = 'log'
             else:
                 message = f'Status: {status_text}'
                 msg_type = 'log'
-            
+
             web_message = {
                 'type': msg_type,
                 'sender': 'system',
@@ -586,11 +718,11 @@ class WebHandler(Node):
                 'message': message,
                 'timestamp': datetime.now().isoformat()
             }
-            
+
             self.web_response_pub.publish(
                 String(data=json.dumps(web_message))
             )
-            
+
         except Exception as e:
             self.get_logger().error(f'Error handling motion status: {e}')
     
@@ -602,12 +734,64 @@ class WebHandler(Node):
                 self.status_cache['vision_state'] = 'Online'
         except Exception as e:
             self.get_logger().error(f'Error handling vision data: {e}')
+
+    def handle_camera_info(self, msg: CameraInfo):
+        """Track camera as online when CameraInfo messages arrive."""
+        with self.status_lock:
+            self.status_cache['camera_state'] = 'Online'
+            self._last_seen['camera'] = datetime.now()
     
     def publish_web_status(self):
-        """Publish status updates to web."""
+        """Publish status updates to web, with node-graph and staleness detection."""
+        now = datetime.now()
+        stale_threshold = 15  # seconds
+
+        # ---- Node-graph check (every 5 timer ticks = 5s) -----------------
+        self._node_check_counter += 1
+        if self._node_check_counter >= 5:
+            self._node_check_counter = 0
+            try:
+                node_names = [n for n, ns in self.get_node_names_and_namespaces()]
+                with self.status_lock:
+                    # Coordinator
+                    if 'franka_coordinator' in node_names:
+                        self.status_cache['coordinator_state'] = 'Online'
+                        self._last_seen['coordinator'] = now
+                    # VLM / Vision
+                    if 'vlm_node' in node_names:
+                        self.status_cache['vision_state'] = 'Online'
+                        self._last_seen['vlm'] = now
+                    # LLM
+                    if 'llm_coordinator' in node_names or 'llm_node' in node_names:
+                        self.status_cache['llm_state'] = 'Online'
+                        self._last_seen['llm'] = now
+                    # Motion executor
+                    if 'motion_executor' in node_names:
+                        # Only mark node-level presence; motion_state text comes from /motion/status
+                        self._last_seen['motion'] = now
+            except Exception as e:
+                self.get_logger().debug(f'Node graph check failed: {e}')
+
         with self.status_lock:
+            # Staleness: mark offline if no recent activity AND no node detected
+            for component, key in [
+                ('llm',         'llm_state'),
+                ('vlm',         'vision_state'),
+                ('coordinator', 'coordinator_state'),
+                ('camera',      'camera_state'),
+            ]:
+                last = self._last_seen.get(component)
+                if last is None or (now - last).total_seconds() > stale_threshold:
+                    if self.status_cache.get(key) == 'Online':
+                        self.status_cache[key] = 'Offline'
+
+            last_motion = self._last_seen.get('motion')
+            if not last_motion or (now - last_motion).total_seconds() > stale_threshold:
+                if self.status_cache.get('motion_state') not in ('Idle', 'Completed', 'Failed'):
+                    self.status_cache['motion_state'] = 'Idle'
+
             status_to_send = dict(self.status_cache)
-        
+
         self.web_status_pub.publish(
             String(data=json.dumps(status_to_send))
         )

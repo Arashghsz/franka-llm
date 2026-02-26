@@ -52,7 +52,8 @@ print('X_cam',X_cam)
 X_aruco = R_aruco_cam @ X_cam + t_aruco_cam
 
 print("Object in ArUco frame:", X_aruco)
-robot_x = X_aruco[1] + 0.48
-robot_y = -X_aruco[0]
+# 0.48 is the way we calibrated the camera based on the robot arm (camera_calibration.py) which is done only once-It's done
+robot_x = -X_aruco[1] + 0.48
+robot_y = -X_aruco[0] - 0.01
 robot_z = X_aruco[2] + 0.02
 print("Object inRobot:", robot_x, robot_y, robot_z)

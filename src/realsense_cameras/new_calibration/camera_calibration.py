@@ -43,6 +43,16 @@ parameters = cv2.aruco.DetectorParameters()
  
 # Create the ArUco detector
 detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
+
+# Warmup - discard first few frames
+print("Warming up camera...")
+import time
+for _ in range(30):
+    try:
+        pipe.wait_for_frames()
+    except:
+        time.sleep(0.1)
+print("Camera ready!")
  
 while(True):
     frame = pipe.wait_for_frames()

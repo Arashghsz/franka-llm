@@ -65,11 +65,11 @@ def draw_center_marker(image: np.ndarray, center: list, object_name: str = None,
     cv2.circle(img_marked, (x, y), 8, (255, 255, 255), 2)  # White outline on center dot
     
     # Add info text with high-contrast background
-    info_lines = [f'>>> PIXEL: ({x}, {y})']
+    info_lines = [f'Pixel: ({x}, {y})']
     if object_name:
-        info_lines.insert(0, f'>>> OBJECT: {object_name}')
+        info_lines.insert(0, f'Object: {object_name}')
     if depth is not None:
-        info_lines.append(f'>>> DEPTH: {depth:.3f}m')
+        info_lines.append(f'Depth: {depth:.3f} m')
     
     # Draw text with thick background for maximum visibility
     font = cv2.FONT_HERSHEY_DUPLEX

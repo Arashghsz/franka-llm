@@ -262,8 +262,11 @@ class VLMNode(Node):
         # Encode image
         image_base64 = encode_image_to_base64(self.latest_image)
         
+        # Pass actual image dimensions so VLM coords are normalised correctly
+        h, w = self.latest_image.shape[:2]
+        
         # Query VLM
-        result = self.vlm_client.locate_object(image_base64, target_object)
+        result = self.vlm_client.locate_object(image_base64, target_object, img_width=w, img_height=h)
         
         if result:
             # Parse and normalize response
@@ -284,7 +287,13 @@ class VLMNode(Node):
                 position_3d = self.depth_processor.get_3d_position(center[0], center[1])
                 depth_value = position_3d['position'][2] if position_3d else None
                 
-                # Save debug image with marker
+                if position_3d:
+                    pos = position_3d['position']
+                    self.get_logger().info(
+                        f'3D Position: X={pos[0]:.3f}m, Y={pos[1]:.3f}m, Z={pos[2]:.3f}m'
+                    )
+                
+                # Save debug image BEFORE publishing so web_handler finds the right file
                 if self.save_images and self.debug_dir:
                     try:
                         saved_path = save_debug_image(
@@ -298,13 +307,7 @@ class VLMNode(Node):
                         self.get_logger().info(f'✓ Saved debug image: {Path(saved_path).name}')
                     except Exception as e:
                         self.get_logger().error(f'Failed to save debug image: {e}')
-                
-                if position_3d:
-                    pos = position_3d['position']
-                    self.get_logger().info(
-                        f'3D Position: X={pos[0]:.3f}m, Y={pos[1]:.3f}m, Z={pos[2]:.3f}m'
-                    )
-                
+
                 # Publish results
                 self._publish_explanation(json.dumps(parsed))
                 
@@ -330,9 +333,8 @@ class VLMNode(Node):
         
         if description:
             self.get_logger().info(f'✓ Scene description:\n{description}')
-            self._publish_explanation(description)
             
-            # Save image without marker
+            # Save image BEFORE publishing so web_handler finds the right file
             if self.save_images and self.debug_dir:
                 try:
                     saved_path = save_debug_image(
@@ -344,6 +346,8 @@ class VLMNode(Node):
                     self.get_logger().info(f'✓ Saved debug image: {Path(saved_path).name}')
                 except Exception as e:
                     self.get_logger().error(f'Failed to save debug image: {e}')
+            
+            self._publish_explanation(description)
         else:
             self.get_logger().error('✗ Failed to get scene description')
     

@@ -5,114 +5,125 @@
 
 class StatusModule {
     constructor() {
-        this.robotState = document.getElementById('robotState');
-        this.visionState = document.getElementById('visionState');
-        this.llmState = document.getElementById('llmState');
-        this.bridgeState = document.getElementById('bridgeState');
+        this.robotState       = document.getElementById('robotState');
+        this.visionState      = document.getElementById('visionState');
+        this.llmState         = document.getElementById('llmState');
+        this.bridgeState      = document.getElementById('bridgeState');
+        this.coordinatorState = document.getElementById('coordinatorState');
+        this.motionState      = document.getElementById('motionState');
+        this.lastDetection    = document.getElementById('lastDetection');
+        this.lastAction       = document.getElementById('lastAction');
+        this.cameraState      = document.getElementById('cameraState');
         this.monitoringInterval = null;
         this.subscribed = false;
+        this._addNeutralStyle();
+    }
+
+    _addNeutralStyle() {
+        if (document.getElementById('status-neutral-style')) return;
+        const s = document.createElement('style');
+        s.id = 'status-neutral-style';
+        s.textContent = `
+            .status-value.neutral { color: var(--text-secondary, #8888aa); }
+            .status-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+        `;
+        document.head.appendChild(s);
     }
 
     startMonitoring() {
-        // Subscribe to web status updates from web_handler
         if (window.ros) {
-            // Try to subscribe if connected, or set up subscription for when it connects
             const subscribe = () => {
-                if (this.subscribed) {
-                    return; // Already subscribed
-                }
-                
+                if (this.subscribed) return;
                 if (window.ros && window.ros.isConnected()) {
                     try {
-                        window.ros.subscribe(
-                            '/web/status',
-                            'std_msgs/String',
-                            (msg) => {
-                                try {
-                                    const status = JSON.parse(msg.data);
-                                    this.updateStatusDisplay(status);
-                                } catch (e) {
-                                    console.error('Error parsing status:', e);
-                                }
-                            }
-                        );
+                        window.ros.subscribe('/web/status', 'std_msgs/String', (msg) => {
+                            try {
+                                this.updateStatusDisplay(JSON.parse(msg.data));
+                            } catch (e) { console.error('Error parsing status:', e); }
+                        });
                         this.subscribed = true;
                         console.log('✅ Subscribed to /web/status');
-                    } catch (e) {
-                        console.error('Error subscribing to /web/status:', e);
-                    }
-                } else {
-                    console.log('⏳ Waiting for ROS connection to subscribe to /web/status');
+                    } catch (e) { console.error('Error subscribing to /web/status:', e); }
                 }
             };
-            
-            // Subscribe immediately if already connected
             subscribe();
-            
-            // Retry periodically until connected
+            // Retry until subscribed (handles delayed WS connection)
             const retryInterval = setInterval(() => {
-                if (this.subscribed) {
-                    clearInterval(retryInterval);
-                } else {
+                if (this.subscribed) clearInterval(retryInterval);
+                else subscribe();
+            }, 1000);
+            setTimeout(() => clearInterval(retryInterval), 30000);
+
+            // Re-subscribe if the WebSocket disconnects and reconnects.
+            // Poll the connected state; when we see a reconnect, reset the flag
+            // so the retryInterval (or next tick) re-subscribes.
+            let wasConnected = window.ros.isConnected();
+            setInterval(() => {
+                const nowConnected = window.ros.isConnected();
+                if (!wasConnected && nowConnected) {
+                    // Reconnected — allow re-subscription
+                    this.subscribed = false;
                     subscribe();
                 }
-            }, 1000);
-            
-            // Stop retrying after 10 seconds
-            setTimeout(() => clearInterval(retryInterval), 10000);
+                wasConnected = nowConnected;
+            }, 2000);
         }
 
-        // Check connection status every 2 seconds
-        this.monitoringInterval = setInterval(() => {
-            this.checkConnections();
-        }, 2000);
+        // Only update bridge connectivity, not individual component states
+        this.monitoringInterval = setInterval(() => this.checkBridgeOnly(), 2000);
     }
 
     stopMonitoring() {
-        if (this.monitoringInterval) {
-            clearInterval(this.monitoringInterval);
-        }
+        if (this.monitoringInterval) clearInterval(this.monitoringInterval);
     }
 
     updateStatusDisplay(status) {
-        // Update each status indicator based on received data
-        const robotStatus = status.robot_state || 'Unknown';
-        const visionStatus = status.vision_state || 'Unknown';
-        const llmStatus = status.llm_state || 'Unknown';
-        const bridgeStatus = status.bridge_state || 'Offline';
-        
-        // Determine CSS class based on status
-        const robotClass = robotStatus.toLowerCase().includes('connected') ? 'connected' : 'disconnected';
-        const visionClass = visionStatus.toLowerCase().includes('online') ? 'connected' : 'disconnected';
-        const llmClass = llmStatus.toLowerCase().includes('online') || llmStatus.toLowerCase().includes('ready') ? 'connected' : 'disconnected';
-        const bridgeClass = bridgeStatus.toLowerCase().includes('online') ? 'connected' : 'disconnected';
-        
-        this.setStatus(this.robotState, robotClass, robotStatus);
-        this.setStatus(this.visionState, visionClass, visionStatus);
-        this.setStatus(this.llmState, llmClass, llmStatus);
-        if (this.bridgeState) {
-            this.setStatus(this.bridgeState, bridgeClass, bridgeStatus);
+        const robotStatus       = status.robot_state       || 'Unknown';
+        const visionStatus      = status.vision_state      || 'Unknown';
+        const llmStatus         = status.llm_state         || 'Unknown';
+        const bridgeStatus      = status.bridge_state      || 'Offline';
+        const coordinatorStatus = status.coordinator_state || 'Offline';
+        const motionStatus      = status.motion_state      || 'Idle';
+        const cameraStatus      = status.camera_state      || 'Offline';
+        const lastDetection     = status.last_detection    || 'None';
+        const lastAction        = status.last_action       || 'None';
+
+        const online  = s => s.toLowerCase().includes('online') || s.toLowerCase().includes('connected') || s.toLowerCase().includes('ready');
+        const warning = s => ['idle', 'pending', 'planning', 'approaching'].includes(s.toLowerCase());
+
+        this.setStatus(this.robotState,       online(robotStatus)       ? 'connected' : 'disconnected', robotStatus);
+        this.setStatus(this.visionState,      online(visionStatus)      ? 'connected' : 'disconnected', visionStatus);
+        this.setStatus(this.llmState,         online(llmStatus)         ? 'connected' : 'disconnected', llmStatus);
+        this.setStatus(this.bridgeState,      online(bridgeStatus)      ? 'connected' : 'disconnected', bridgeStatus);
+        this.setStatus(this.coordinatorState, online(coordinatorStatus) ? 'connected' : 'disconnected', coordinatorStatus);
+        this.setStatus(this.cameraState,      online(cameraStatus)      ? 'connected' : 'disconnected', cameraStatus);
+
+        // Motion: green=executing/completed, yellow=idle/planning, red=failed
+        const motionLower = motionStatus.toLowerCase();
+        const motionClass = motionLower === 'failed'  ? 'disconnected'
+                          : motionLower === 'idle'    ? 'neutral'
+                          : warning(motionStatus)     ? 'warning'
+                          :                            'connected';
+        this.setStatus(this.motionState, motionClass, motionStatus);
+
+        // Informational fields — neutral colour
+        if (this.lastDetection) {
+            this.lastDetection.className = 'status-value neutral';
+            this.lastDetection.textContent = lastDetection;
+        }
+        if (this.lastAction) {
+            this.lastAction.className = 'status-value neutral';
+            this.lastAction.textContent = lastAction;
         }
     }
 
-    checkConnections() {
+    // Only update the bridge indicator on the timer — don't blank out component states
+    checkBridgeOnly() {
+        if (!this.bridgeState) return;
         if (window.ros && window.ros.isConnected()) {
-            if (this.bridgeState) {
-                this.setStatus(this.bridgeState, 'connected', 'Online');
-            }
+            this.setStatus(this.bridgeState, 'connected', 'Online');
         } else {
-            if (this.robotState) {
-                this.setStatus(this.robotState, 'disconnected', 'Disconnected');
-            }
-            if (this.visionState) {
-                this.setStatus(this.visionState, 'disconnected', 'Offline');
-            }
-            if (this.llmState) {
-                this.setStatus(this.llmState, 'disconnected', 'Offline');
-            }
-            if (this.bridgeState) {
-                this.setStatus(this.bridgeState, 'disconnected', 'Offline');
-            }
+            this.setStatus(this.bridgeState, 'disconnected', 'Offline');
         }
     }
 
@@ -123,3 +134,4 @@ class StatusModule {
         }
     }
 }
+

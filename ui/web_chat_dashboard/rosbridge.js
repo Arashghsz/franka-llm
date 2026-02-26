@@ -7,7 +7,8 @@ class ROSBridge {
     constructor(config = {}) {
         this.url = config.url || 'ws://localhost:9090';
         this.connected = false;
-        this.subscribers = new Map();
+        this.subscribers = new Map();      // topic -> callbacks[]
+        this.subscriptionTypes = new Map(); // topic -> messageType (for reconnect)
         this.publishers = new Map();
         this.services = new Map();
 
@@ -21,6 +22,13 @@ class ROSBridge {
             this.ws.onopen = () => {
                 console.log('Connected to ROSBridge');
                 this.connected = true;
+                // Re-send all subscription requests to the server after (re)connect
+                this.subscriptionTypes.forEach((type, topic) => {
+                    this.send({ op: 'subscribe', topic: topic, type: type });
+                });
+                if (this.subscriptionTypes.size > 0) {
+                    console.log(`Re-subscribed to ${this.subscriptionTypes.size} topic(s) after connect`);
+                }
             };
 
             this.ws.onmessage = (event) => {
@@ -55,18 +63,18 @@ class ROSBridge {
     }
 
     subscribe(topic, messageType, callback) {
-        const request = {
-            op: 'subscribe',
-            topic: topic,
-            type: messageType
-        };
+        // Track the type for reconnect re-subscription
+        this.subscriptionTypes.set(topic, messageType);
 
         if (!this.subscribers.has(topic)) {
             this.subscribers.set(topic, []);
-            this.send(request);
         }
-
         this.subscribers.get(topic).push(callback);
+
+        // Send subscribe op now if already connected; onopen handles the rest
+        if (this.connected && this.ws.readyState === WebSocket.OPEN) {
+            this.send({ op: 'subscribe', topic: topic, type: messageType });
+        }
     }
 
     unsubscribe(topic) {

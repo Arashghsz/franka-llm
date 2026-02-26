@@ -110,6 +110,41 @@
                                 <span class="status-value" id="bridgeState">Offline</span>
                             </div>
                         </div>
+                        <div class="status-card">
+                            <div class="status-icon"><i class="fas fa-microchip"></i></div>
+                            <div class="status-info">
+                                <span class="status-label">Coordinator Node</span>
+                                <span class="status-value" id="coordinatorState">Offline</span>
+                            </div>
+                        </div>
+                        <div class="status-card">
+                            <div class="status-icon"><i class="fas fa-cogs"></i></div>
+                            <div class="status-info">
+                                <span class="status-label">Motion Executor</span>
+                                <span class="status-value" id="motionState">Idle</span>
+                            </div>
+                        </div>
+                        <div class="status-card">
+                            <div class="status-icon"><i class="fas fa-crosshairs"></i></div>
+                            <div class="status-info">
+                                <span class="status-label">Last Detection</span>
+                                <span class="status-value neutral" id="lastDetection">None</span>
+                            </div>
+                        </div>
+                        <div class="status-card">
+                            <div class="status-icon"><i class="fas fa-hand-pointer"></i></div>
+                            <div class="status-info">
+                                <span class="status-label">Last Action</span>
+                                <span class="status-value neutral" id="lastAction">None</span>
+                            </div>
+                        </div>
+                        <div class="status-card">
+                            <div class="status-icon"><i class="fas fa-video"></i></div>
+                            <div class="status-info">
+                                <span class="status-label">Camera</span>
+                                <span class="status-value" id="cameraState">Offline</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -135,11 +170,9 @@
 
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="modules/utils.js"></script>
     <script src="rosbridge.js"></script>
     <script src="modules/chat.js"></script>
     <script src="modules/status.js"></script>
-    <script src="modules/confirm.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

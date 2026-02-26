@@ -20,7 +20,7 @@ from datetime import datetime
 from enum import Enum
 import numpy as np
 from cv_bridge import CvBridge
-from .coordinate_transformer import CoordinateTransformer
+from .aruco_coordinate_transformer import ArucoCoordinateTransformer
 
 # Message types (we'll use std_msgs.String with JSON for now)
 class TaskStatus(Enum):
@@ -40,7 +40,7 @@ class FrankaCoordinator(Node):
         # Status tracking
         self.robot_status = "disconnected"
         self.vision_status = "offline"
-        self.llm_status = "offline"
+        self.llm_status = "online"   # LLM coordinator is available whenever this node starts
         self.current_task = None
         self.task_status = TaskStatus.PENDING.value
         
@@ -54,11 +54,13 @@ class FrankaCoordinator(Node):
         self.last_target_name = None
         self.last_action = None
         
-        # Coordinate transformer (pixel → robot frame)
-        self.transformer = CoordinateTransformer(
+        # Coordinate transformer (pixel → robot frame) - ArUco-based
+        self.transformer = ArucoCoordinateTransformer(
             node=self,
-            robot_frame='fr3_link0',  # Franka FR3 robot base
-            camera_frame='ee_d435i_color_optical_frame'  # RealSense D435i optical frame
+            # Calibration files are in src/realsense_cameras/new_calibration/
+            calibration_dir=None,  # Uses default path
+            robot_offset_x=0.48,  # X offset from ArUco marker to robot base
+            robot_offset_z=0.02   # Z offset from ArUco marker to robot base
         )
         
         # Publisher for outgoing commands
@@ -80,6 +82,11 @@ class FrankaCoordinator(Node):
         # Publisher for 3D target position
         self.target_position_pub = self.create_publisher(
             PoseStamped, '/target_position', 10
+        )
+
+        # Publisher for robot-frame position info (String JSON for web display)
+        self.target_position_info_pub = self.create_publisher(
+            String, '/target_position_info', 10
         )
         
         # Subscriber for web dashboard requests
@@ -219,6 +226,7 @@ class FrankaCoordinator(Node):
         """Handle response from LLM node."""
         try:
             response = json.loads(msg.data)
+            self.llm_status = "online"
             self.get_logger().info(f'LLM response: {response.get("response", "")}')
             
             # If LLM returns a command, send it to motion executor
@@ -333,10 +341,12 @@ class FrankaCoordinator(Node):
             self.get_logger().info(f'   Center pixel: {center}')
             self.get_logger().info(f'   Action: {action}')
             
-            # Use fixed position instead of camera transform
-            import numpy as np
-            position_robot = np.array([0.5, -0.2, 0.5])  # x=60cm, y=-20cm, z=50cm (FIXED)
-            self.get_logger().info('   Using FIXED position: x=0.5, y=-0.2, z=0.5')
+            # Convert pixel + depth → robot frame using ArUco calibration
+            position_robot = self._convert_pixel_to_robot_frame(center, target)
+            
+            if position_robot is None:
+                self.get_logger().error(f'❌ Failed to compute 3D position for "{target}"')
+                return
             
             # Store position for republishing on user confirmation
             self.last_target_position = position_robot
@@ -345,6 +355,17 @@ class FrankaCoordinator(Node):
             
             # Publish target position for motion executor preview
             self._publish_target_position(position_robot, target, action)
+
+            # Publish robot-frame coords as JSON for web_handler display
+            pos_info = {
+                'target': target,
+                'x': float(position_robot[0]),
+                'y': float(position_robot[1]),
+                'z': float(position_robot[2]),
+            }
+            self.target_position_info_pub.publish(
+                String(data=json.dumps(pos_info))
+            )
                 
         except Exception as e:
             self.get_logger().error(f'Error handling VLM grounding: {e}')

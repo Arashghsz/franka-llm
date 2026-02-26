@@ -121,7 +121,37 @@ cd /home/arash/franka-llm/ui/web_chat_dashboard
 python3 -m http.server 8000
 ```
 
-### Step 8: Open Browser
+### Step 8: Start Coordinator Node (ArUco transform + motion routing)
+
+```bash
+# Terminal 7
+cd ~/franka-llm
+source install/setup.zsh
+ros2 run franka_coordinator coordinator_node
+```
+
+> This node loads the ArUco calibration from `src/realsense_cameras/new_calibration/`
+> and converts VLM pixel detections into robot-base-frame coordinates.
+
+### Step 9: Start Motion Executor
+
+```bash
+# Terminal 8
+cd ~/franka-llm
+source install/setup.zsh
+ros2 run franka_motion_executor motion_executor
+```
+
+### Step 10: Launch MoveIt (real robot)
+
+```bash
+# Terminal 9
+cd ~/franka_ros2_ws
+source install/setup.zsh
+ros2 launch franka_fr3_moveit_config moveit.launch.py robot_ip:=172.16.0.2 use_fake_hardware:=false
+```
+
+### Step 11: Open Browser
 
 Navigate to: **http://localhost:8000**
 
@@ -131,25 +161,6 @@ You should see:
 - ✅ Status cards showing system state
 
 ---
-### Terminal 9 - Coordinator (Coordinate Transform)
-```bash
-cd ~/franka-llm
-source install/setup.zsh
-ros2 run franka_coordinator coordinator_node
-```
-
-### Terminal 10 - Motion Executor
-```bash
-cd ~/franka-llm
-source install/setup.zsh
-ros2 run franka_motion_executor motion_executor
-```
-
-### Terminal 10 - Moveit launch
-```bash
-cd ~/franka_ros2_ws && source install/setup.zsh && ros2 launch franka_fr3_moveit_config moveit.launch.py robot_ip:=172.16.0.2 use_fake_hardwar:=false
-
-```
 
 
 

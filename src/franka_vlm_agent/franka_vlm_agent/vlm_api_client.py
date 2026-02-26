@@ -68,13 +68,16 @@ class OllamaVLMClient:
         except Exception as e:
             return False, f'Error: {str(e)}'
     
-    def locate_object(self, image_base64: str, target_object: str) -> Optional[Dict]:
+    def locate_object(self, image_base64: str, target_object: str,
+                      img_width: int = 640, img_height: int = 480) -> Optional[Dict]:
         """
         Locate object in image and get its center coordinates
         
         Args:
             image_base64: Base64 encoded image
             target_object: Object to locate (e.g., "red dice")
+            img_width: Actual image width in pixels
+            img_height: Actual image height in pixels
             
         Returns:
             {
@@ -85,46 +88,52 @@ class OllamaVLMClient:
         """
         self._log(f'Querying VLM to locate: {target_object}', 'debug')
         
-        # Try natural language approach - don't force JSON format
         prompt = (
             f'In this image, I need to find the "{target_object}".\n'
             f'If you can see it, tell me:\n'
             f'1. Where is it located in the image? (describe position)\n'
-            f'2. What are the approximate pixel coordinates of its center? The image is 1280x720 pixels.\n'
+            f'2. What are the approximate pixel coordinates of its center? '
+            f'The image is {img_width}x{img_height} pixels.\n'
             f'Format your answer as: FOUND at pixel (x, y) - description\n'
+            f'Example: FOUND at pixel (320, 240) - yellow dice on the right side\n'
             f'If you cannot find it, say: NOT FOUND'
         )
         
-        # Query without JSON format
         result = self._query(prompt, image_base64, format_json=False)
         
         if result and 'response' in result:
             response_text = result['response']
             self._log(f'Raw VLM response: {response_text}', 'info')
             
-            # Try to parse coordinates from natural language
             import re
             
-            # Look for patterns like "pixel (x, y)" or "coordinates x, y" or "[x, y]"
+            # Parse pixel coordinates — primary format is "pixel (x, y)"
             patterns = [
-                r'pixel\s*\((\d+),\s*(\d+)\)',
-                r'coordinates?\s*\(?(\d+),\s*(\d+)\)?',
-                r'\[(\d+),\s*(\d+)\]',
-                r'at\s*\((\d+),\s*(\d+)\)',
-                r'center.*?(\d+).*?(\d+)',
+                r'pixel\s*\((\d+\.?\d*),\s*(\d+\.?\d*)\)',
+                r'FOUND\s+at\s+\((\d+\.?\d*),\s*(\d+\.?\d*)\)',
+                r'at\s*\((\d+\.?\d*),\s*(\d+\.?\d*)\)',
+                r'\((\d+\.?\d*),\s*(\d+\.?\d*)\)',
             ]
             
             for pattern in patterns:
                 match = re.search(pattern, response_text, re.IGNORECASE)
                 if match:
-                    x, y = int(match.group(1)), int(match.group(2))
+                    fx, fy = float(match.group(1)), float(match.group(2))
+                    # If the model returns fractions (≤ 1.0), scale to pixels
+                    if fx <= 1.0 and fy <= 1.0:
+                        x = int(fx * img_width)
+                        y = int(fy * img_height)
+                    else:
+                        # Raw pixel coords — clamp to actual image bounds
+                        x = max(0, min(img_width - 1, int(fx)))
+                        y = max(0, min(img_height - 1, int(fy)))
                     return {
                         'center': [x, y],
-                        'description': response_text[:100],
+                        'description': response_text[:150],
                         'confidence': 'high' if 'FOUND' in response_text.upper() else 'medium'
                     }
             
-            # If no coordinates found but object is mentioned
+            # No coordinates found but object mentioned
             if target_object.lower() in response_text.lower() and 'not found' not in response_text.lower():
                 return {
                     'center': None,

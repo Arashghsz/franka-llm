@@ -78,14 +78,14 @@ class ChatModule {
         this.chatHistory.appendChild(typingDiv);
         this.chatHistory.scrollTop = this.chatHistory.scrollHeight;
         
-        console.log('✨ Typing indicator shown');
+        console.log('Typing indicator shown');
     }
     
     hideTypingIndicator() {
         const typingIndicator = document.getElementById('typing-indicator');
         if (typingIndicator) {
             typingIndicator.remove();
-            console.log('🔄 Typing indicator removed');
+            console.log('Typing indicator removed');
         }
     }
 
@@ -107,14 +107,7 @@ class ChatModule {
                     const agentName = data.agent_name || null;
                     const text = data.message || '';
                     const image = data.image || null;
-                    
-                    // Remove the processing indicator if it exists
-                    const processingMessages = Array.from(this.chatHistory.querySelectorAll('.message-container.system'))
-                        .filter(m => m.textContent.includes('Processing'));
-                    if (processingMessages.length > 0) {
-                        processingMessages[processingMessages.length - 1].remove();
-                    }
-                    
+
                     // Handle different message types
                     if (msgType === 'confirmation_request') {
                         // Hide typing indicator for confirmation
@@ -143,9 +136,9 @@ class ChatModule {
                 }
             });
             
-            console.log('✅ Subscribed to /web/response');
+            console.log('Subscribed to /web/response');
         } else {
-            console.log('⏳ Waiting for ROS connection to subscribe to /web/response');
+            console.log('Waiting for ROS connection to subscribe to /web/response');
         }
     }
     
@@ -238,7 +231,7 @@ class ChatModule {
         this.logsContent.appendChild(logEntry);
         this.logsContent.scrollTop = this.logsContent.scrollHeight;
         
-        console.log('📝 Log added:', agentName, text);
+        console.log('Log added:', agentName, text);
     }
     
     clearLogs() {
@@ -259,11 +252,6 @@ class ChatModule {
         // Line breaks
         text = text.replace(/\n/g, '<br>');
         return text;
-    }
-    
-    handleConfirmationRequest(data) {
-        // This is now handled by addConfirmationMessage
-        this.addConfirmationMessage(data);
     }
     
     sendConfirmation(confirmed) {
@@ -290,7 +278,7 @@ class ChatModule {
         if (window.ros && window.ros.isConnected()) {
             this.sendToLLM(userMessage);
         } else {
-            this.addMessage('⚠️ System offline: Cannot send message. Please ensure ROSBridge is running.', 'system');
+            this.addMessage('System offline: Cannot send message. Please ensure ROSBridge is running.', 'system');
         }
     }
 
@@ -368,7 +356,7 @@ class ChatModule {
         }
 
         // Show data flow start instead of generic "Processing"
-        this.addLogMessage('Request sent to Web Handler', '📤 Browser');
+        this.addLogMessage('Request sent to Web Handler', 'Browser');
     }
 
     escapeHtml(text) {
@@ -382,18 +370,10 @@ class ChatModule {
         return text.replace(/[&<>"']/g, m => map[m]);
     }
 
-    getHistory() {
-        return this.messages;
-    }
-
     clearHistory() {
-        if (!this.chatHistory) {
-            console.warn('Chat history element not found');
-            return;
-        }
-        
+        if (!this.chatHistory) return;
         this.messages = [];
         this.chatHistory.innerHTML = '';
-        this.addMessage('👋 Welcome! I\'m your Franka robot assistant. You can ask me to perform tasks like "pick up the red cube" or "move to home position".', 'robot');
+        this.addMessage('Chat cleared. Ask me anything — I can describe the scene, find objects, or execute motions.', 'robot', null, 'Franka Assistant');
     }
 }
