@@ -348,6 +348,16 @@ class FrankaCoordinator(Node):
                 self.get_logger().error(f'❌ Failed to compute 3D position for "{target}"')
                 return
             
+            # Apply offset for place actions (6cm to the side to avoid placing on top of reference)
+            if action == 'place':
+                import numpy as np
+                # Add 6cm offset in the Y direction (to the side)
+                position_robot = position_robot + np.array([0.0, 0.06, 0.0])
+                self.get_logger().info(
+                    f'   Applied 6cm offset for place action:\n'
+                    f'   Final position: X={position_robot[0]:+.4f}m, Y={position_robot[1]:+.4f}m, Z={position_robot[2]:+.4f}m'
+                )
+            
             # Store position for republishing on user confirmation
             self.last_target_position = position_robot
             self.last_target_name = target

@@ -114,32 +114,60 @@ You are conversational and helpful. Handle these types of interactions:
 
 2. TASK ROUTING:
 Available agents:
-- VLM (Vision-Language Model): Analyzes the scene, describes what's on the table, locates objects
+- VLM (Vision-Language Model): Analyzes the scene, describes what's on the table, locates objects/locations
 - MOTION: Executes physical movements (pick, place, move)
 
 Decision rules:
-- "what do you see", "describe the table", etc. → Route to VLM (scene description)
-- "where is the [object]" → Route to VLM (object localization)
-- "pick", "place", "move", "grasp" → Route to BOTH (VLM finds object, MOTION executes)
+- "what do you see", "describe the table" → intent: "inspect", target: VLM, action: "describe_scene"
+- "where is the [object]" → intent: "inspect", target: VLM, action: "locate_object" (just find, no manipulation)
+- "pick [object]", "grasp [object]" → intent: "manipulate", target: BOTH, action: "pick" (VLM finds object, MOTION executes)
+- "place it [location]", "put it [location]", "place the object [location]" → intent: "manipulate", target: BOTH, action: "place"
+  - CRITICAL: Extract the COMPLETE location description from the command including ALL details
+  - Location examples: 
+    * "on the left" → location: "on the left"
+    * "next to the red cube" → location: "next to the red cube"
+    * "left side of the yellow dice" → location: "left side of the yellow dice"
+    * "at the left side of the yellow dice with 4 dots" → location: "left side of the yellow dice with 4 dots"
+  - Include ALL descriptive details (colors, features, positions relative to other objects)
+  - NEVER truncate or shorten the location description
+  - NEVER include "it" or "the object I have" or "what I'm holding" in parameters
+  - For "place it next to the red cube" → parameters: {"location": "next to the red cube"} (NO object field)
+  - For "place it at the left side of the yellow dice with 4 dots" → parameters: {"location": "left side of the yellow dice with 4 dots"} (NO object field)
+- "move [object] to [location]" → intent: "manipulate", target: BOTH, action: "move"
 
 Respond in JSON format:
 {
-  "intent": "greeting" | "inspect" | "manipulate" | "locate" | "query",
+  "intent": "greeting" | "inspect" | "manipulate" | "query",
   "target_agent": "none" | "vlm" | "motion" | "both",
   "action": "greet" | "describe_scene" | "locate_object" | "pick" | "place" | "move",
   "response": "your direct response for greetings/queries (if target_agent is none)",
   "parameters": {
-    "object": "target object name if applicable",
-    "location": "target location if applicable"
+    "object": "target object name (ONLY for pick/move actions, NEVER for place)",
+    "location": "target location description (ONLY for place/move actions)"
   },
   "reasoning": "brief explanation"
 }
 
+IMPORTANT FOR PLACE ACTIONS:
+- If user says "place it [somewhere]" or "put it [somewhere]", extract the COMPLETE location description
+- Include ALL details: colors, features, relative positions, object characteristics
+- Do NOT truncate or shorten the location - capture everything after "place it" or "put it"
+- Do NOT add an "object" field for place actions
+- The robot already has the object in its gripper
+- Examples: 
+  * "place it next to the red cube" → {"location": "next to the red cube"}
+  * "place it at the left side of the table" → {"location": "left side of the table"}
+  * "place it at the left side of the yellow dice with 4 dots at the top of it" → {"location": "left side of the yellow dice with 4 dots at the top of it"}
+
 Examples:
 - "hello" → {"intent": "greeting", "target_agent": "none", "action": "greet", "response": "Hello! I'm Franka Assistant, your robot coordinator. I can help you inspect the workspace or manipulate objects. What would you like to do?", ...}
 - "what do you see?" → {"intent": "inspect", "target_agent": "vlm", "action": "describe_scene", ...}
-- "where is the red cup?" → {"intent": "locate", "target_agent": "vlm", "action": "locate_object", "parameters": {"object": "red cup"}, ...}
+- "where is the red cup?" → {"intent": "inspect", "target_agent": "vlm", "action": "locate_object", "parameters": {"object": "red cup"}, ...}
 - "pick up the apple" → {"intent": "manipulate", "target_agent": "both", "action": "pick", "parameters": {"object": "apple"}, ...}
+- "place it on the left side" → {"intent": "manipulate", "target_agent": "both", "action": "place", "parameters": {"location": "on the left side"}, ...}
+- "place it next to the red cube" → {"intent": "manipulate", "target_agent": "both", "action": "place", "parameters": {"location": "next to the red cube"}, ...}
+- "place it at the left side of the yellow dice with 4 dots at the top of it" → {"intent": "manipulate", "target_agent": "both", "action": "place", "parameters": {"location": "left side of the yellow dice with 4 dots at the top of it"}, ...}
+- "put it in the center" → {"intent": "manipulate", "target_agent": "both", "action": "place", "parameters": {"location": "in the center"}, ...}
 """
         
         self.get_logger().info(f'LLM Coordinator started. Model: {self.model}')
@@ -287,8 +315,14 @@ Examples:
             'timestamp': datetime.now().isoformat()
         }
         
+        # Handle location-only place requests
+        if action == 'place' and parameters.get('location') and not parameters.get('object'):
+            vlm_request['type'] = 'ground_location'
+            vlm_request['location'] = parameters['location']
+            self.get_logger().info(f"Requesting VLM to ground location: {parameters['location']}")
+            self._publish_log('Vision Agent', f"Grounding location: {parameters['location']}")
         # For locate or pick actions, we need object localization
-        if action in ['locate_object', 'pick', 'place', 'move']:
+        elif action in ['locate_object', 'pick', 'place', 'move']:
             target_object = parameters.get('object', '')
             if target_object:
                 vlm_request['type'] = 'locate'

@@ -224,6 +224,8 @@ class VLMNode(Node):
             
             if request_type == 'locate' and target_object:
                 self._handle_locate_request(target_object)
+            elif request_type == 'ground_location' and target_object:
+                self._handle_ground_location_request(target_object)
             else:
                 self._handle_describe_request()
                 
@@ -233,7 +235,7 @@ class VLMNode(Node):
             self.get_logger().error(traceback.format_exc())
     
     def _parse_request(self, request_str: str) -> tuple:
-        """Parse request string into (type, object_name)"""
+        """Parse request string into (type, object_name or location)"""
         try:
             # Try JSON format
             req = json.loads(request_str)
@@ -244,6 +246,8 @@ class VLMNode(Node):
                 return 'describe', None
             elif req_type == 'locate':
                 return 'locate', req.get('object', None)
+            elif req_type == 'ground_location':
+                return 'ground_location', req.get('location', None)
             else:
                 return 'describe', None
                 
@@ -254,6 +258,73 @@ class VLMNode(Node):
                 return 'locate', text[7:].strip()
             else:
                 return 'describe', None
+    
+    def _handle_ground_location_request(self, location_description: str):
+        """Handle location grounding request"""
+        self.get_logger().info(f'Grounding location: "{location_description}"...')
+        
+        # Encode image
+        image_base64 = encode_image_to_base64(self.latest_image)
+        
+        # Pass actual image dimensions
+        h, w = self.latest_image.shape[:2]
+        
+        # Query VLM
+        result = self.vlm_client.ground_location(image_base64, location_description, img_width=w, img_height=h)
+        
+        if result:
+            # Parse and normalize response
+            parsed = parse_vlm_response(json.dumps(result))
+            
+            if parsed and parsed.get('center'):
+                center = parsed['center']
+                confidence = parsed.get('confidence', 'unknown')
+                description = parsed.get('description', '')
+                
+                self.get_logger().info(
+                    f'✓ Located "{location_description}" at pixel {center}\n'
+                    f'  Confidence: {confidence}\n'
+                    f'  Description: {description}'
+                )
+                
+                # Get 3D position first (need depth for debug image)
+                position_3d = self.depth_processor.get_3d_position(center[0], center[1])
+                depth_value = position_3d['position'][2] if position_3d else None
+                
+                if position_3d:
+                    pos = position_3d['position']
+                    self.get_logger().info(
+                        f'3D Position: X={pos[0]:.3f}m, Y={pos[1]:.3f}m, Z={pos[2]:.3f}m'
+                    )
+                
+                # Save debug image BEFORE publishing so web_handler finds the right file
+                if self.save_images and self.debug_dir:
+                    try:
+                        # Use location description as filename
+                        saved_path = save_debug_image(
+                            self.latest_image,
+                            location_description.replace(' ', '_'),
+                            center=center,
+                            depth=depth_value,
+                            debug_dir=self.debug_dir,
+                            model_name=self.vlm_model
+                        )
+                        self.get_logger().info(f'✓ Saved debug image: {Path(saved_path).name}')
+                    except Exception as e:
+                        self.get_logger().error(f'Failed to save debug image: {e}')
+
+                # Publish results
+                self._publish_explanation(json.dumps(parsed))
+                
+                if position_3d:
+                    self._publish_position(position_3d)
+                    # Publish grounding with bbox for coordinator
+                    self._publish_grounding(location_description, center, 'place')
+            else:
+                self.get_logger().warn(f'✗ Could not ground location "{location_description}"')
+                self._publish_explanation(f'Location "{location_description}" not found')
+        else:
+            self.get_logger().error(f'✗ Failed to get response from VLM')
     
     def _handle_locate_request(self, target_object: str):
         """Handle object localization request"""

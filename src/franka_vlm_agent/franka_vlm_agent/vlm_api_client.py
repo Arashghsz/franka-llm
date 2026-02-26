@@ -143,6 +143,72 @@ class OllamaVLMClient:
         
         return None
     
+    def ground_location(self, image_base64: str, location_description: str,
+                       img_width: int = 640, img_height: int = 480) -> Optional[Dict]:
+        """
+        Ground a location description to pixel coordinates
+        
+        Args:
+            image_base64: Base64 encoded image
+            location_description: Location description (e.g., "left down side of the table", "next to the red cube")
+            img_width: Actual image width in pixels
+            img_height: Actual image height in pixels
+            
+        Returns:
+            {
+                "center": [x, y],
+                "description": "...",
+                "confidence": "high|medium|low"
+            } or None if not found
+        """
+        self._log(f'Querying VLM to ground location: {location_description}', 'debug')
+        
+        prompt = (
+            f'In this image, I need to find the location described as "{location_description}".\n'
+            f'Look at the table and identify where this location is.\n'
+            f'Tell me the approximate pixel coordinates of this location. '
+            f'The image is {img_width}x{img_height} pixels.\n'
+            f'Format your answer as: FOUND at pixel (x, y) - description\n'
+            f'Example: FOUND at pixel (150, 350) - left down side of the table\n'
+            f'If you cannot identify this location, say: NOT FOUND'
+        )
+        
+        result = self._query(prompt, image_base64, format_json=False)
+        
+        if result and 'response' in result:
+            response_text = result['response']
+            self._log(f'Raw VLM response: {response_text}', 'info')
+            
+            import re
+            
+            # Parse pixel coordinates
+            patterns = [
+                r'pixel\s*\((\d+\.?\d*),\s*(\d+\.?\d*)\)',
+                r'FOUND\s+at\s+\((\d+\.?\d*),\s*(\d+\.?\d*)\)',
+                r'at\s*\((\d+\.?\d*),\s*(\d+\.?\d*)\)',
+                r'\((\d+\.?\d*),\s*(\d+\.?\d*)\)',
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, response_text, re.IGNORECASE)
+                if match:
+                    fx, fy = float(match.group(1)), float(match.group(2))
+                    # If the model returns fractions (≤ 1.0), scale to pixels
+                    if fx <= 1.0 and fy <= 1.0:
+                        x = int(fx * img_width)
+                        y = int(fy * img_height)
+                    else:
+                        # Raw pixel coords — clamp to actual image bounds
+                        x = max(0, min(img_width - 1, int(fx)))
+                        y = max(0, min(img_height - 1, int(fy)))
+                    return {
+                        'center': [x, y],
+                        'description': response_text[:150],
+                        'confidence': 'high' if 'FOUND' in response_text.upper() else 'medium'
+                    }
+        
+        return None
+    
     def describe_scene(self, image_base64: str) -> Optional[str]:
         """
         Get general scene description

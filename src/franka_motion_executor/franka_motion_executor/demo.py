@@ -56,11 +56,11 @@ print("new cashed code")
 # time.sleep(1)
 # manip.move_to_position(0.5, 0, 0.15, velocity_scaling=0.1)
 
-manip.move_to_position(0.699, 0, 0.54, velocity_scaling=0.7)
+# manip.move_to_position(0.699, 0, 0.54, velocity_scaling=0.7)
 # time.sleep(1)
 # manip.move_to_position(0.399, -0.107, 0.14, velocity_scaling=0.1)
 
-manip.open_gripper(width=0.05)
+manip.open_gripper(width=0.02)
 
 manip.move_home()
 # time.sleep(1)
