@@ -128,7 +128,7 @@ class MotionExecutorNode(Node):
     
     def _pick_at_position(self, x: float, y: float, z: float):
         self.get_logger().info('Step 1: Moving to position above object')
-        self.manip.move_to_position(x, y, 0.6, velocity_scaling=0.1)
+        self.manip.move_to_position(x + 0.01, y, 0.6, velocity_scaling=0.1)
         time.sleep(1.0)
         
         self.get_logger().info('Step 2: Opening gripper')
@@ -136,7 +136,7 @@ class MotionExecutorNode(Node):
         time.sleep(1.0)
         
         self.get_logger().info('Step 3: Moving down to grasp')
-        self.manip.move_to_position(x, y, 0.14, velocity_scaling=0.1)
+        self.manip.move_to_position(x + 0.01, y, 0.14, velocity_scaling=0.1)
         time.sleep(1.0)
         
         self.get_logger().info('Step 4: Closing gripper')
@@ -196,7 +196,7 @@ class MotionExecutorNode(Node):
         time.sleep(1.0)
         
         self.get_logger().info('Step 2: Moving down to placement height')
-        self.manip.move_to_position(x, y, 0.14, 0.1, math.pi, 3.05, velocity_scaling=0.1)
+        self.manip.move_to_position(x, y, 0.15, velocity_scaling=0.1)
         time.sleep(1.0)
         
         self.get_logger().info('Step 3: Opening gripper to release')
