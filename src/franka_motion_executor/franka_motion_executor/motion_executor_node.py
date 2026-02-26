@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import math
+
 import rclpy
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
@@ -194,11 +196,11 @@ class MotionExecutorNode(Node):
         time.sleep(1.0)
         
         self.get_logger().info('Step 2: Moving down to placement height')
-        self.manip.move_to_position(x, y, 0.14, velocity_scaling=0.1)
+        self.manip.move_to_position(x, y, 0.14, 0.1, math.pi, 3.05, velocity_scaling=0.1)
         time.sleep(1.0)
         
         self.get_logger().info('Step 3: Opening gripper to release')
-        self.manip.open_gripper(width=0.08)
+        self.manip.open_gripper(width=0.05)
         time.sleep(1.0)
         
         self.get_logger().info('Step 4: Moving back up')
