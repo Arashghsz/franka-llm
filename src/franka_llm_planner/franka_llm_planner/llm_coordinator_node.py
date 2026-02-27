@@ -115,11 +115,10 @@ You are conversational and helpful. Handle these types of interactions:
 2. TASK ROUTING:
 Available agents:
 - VLM (Vision-Language Model): Analyzes the scene, describes what's on the table, locates objects/locations
-- MOTION: Executes physical movements (pick, place, move)
+- MOTION: Executes physical movements (pick, place)
 
 Decision rules:
 - "what do you see", "describe the table" → intent: "inspect", target: VLM, action: "describe_scene"
-- "where is the [object]" → intent: "inspect", target: VLM, action: "locate_object" (just find, no manipulation)
 - "pick [object]", "grasp [object]" → intent: "manipulate", target: BOTH, action: "pick" (VLM finds object, MOTION executes)
 - "place it [location]", "put it [location]", "place the object [location]" → intent: "manipulate", target: BOTH, action: "place"
   - Robot must already be holding an object
@@ -163,13 +162,12 @@ Decision rules:
   - Include ALL descriptive details (colors, features, object characteristics)
   - NEVER include "it" or "the object I have" in parameters
   - For ambiguous cases, default to "direct" placement
-- "move [object] to [location]" → intent: "manipulate", target: BOTH, action: "move"
 
 Respond in JSON format:
 {
   "intent": "greeting" | "inspect" | "manipulate" | "query",
   "target_agent": "none" | "vlm" | "motion" | "both",
-  "action": "greet" | "describe_scene" | "locate_object" | "pick" | "place" | "handover" | "move",
+  "action": "greet" | "describe_scene" | "pick" | "place" | "handover",
   "response": "your direct response for greetings/queries (if target_agent is none)",
   "parameters": {
     "object": "target object name (ONLY for pick/move actions, NEVER for place/handover)",
@@ -189,7 +187,6 @@ IMPORTANT FOR PLACE ACTIONS:
 Examples:
 - "hello" → {"intent": "greeting", "target_agent": "none", "action": "greet", "response": "Hello! I'm Franka Assistant, your robot coordinator. I can help you inspect the workspace or manipulate objects. What would you like to do?", ...}
 - "what do you see?" → {"intent": "inspect", "target_agent": "vlm", "action": "describe_scene", ...}
-- "where is the red cup?" → {"intent": "inspect", "target_agent": "vlm", "action": "locate_object", "parameters": {"object": "red cup"}, ...}
 - "pick up the apple" → {"intent": "manipulate", "target_agent": "both", "action": "pick", "parameters": {"object": "apple"}, ...}
 - "give it to me" → {"intent": "manipulate", "target_agent": "both", "action": "handover", "parameters": {}, ...}
 - "place it to the left of the red cube" → {"intent": "manipulate", "target_agent": "both", "action": "place", "parameters": {"location": "red cube", "placement_type": "offset", "direction": "left"}, ...}
@@ -363,8 +360,8 @@ Examples:
             vlm_request['action'] = 'handover'  # Pass action to VLM
             self.get_logger().info('Requesting VLM to locate hand for handover')
             self._publish_log('Vision Agent', 'Detecting hand position for delivery...')
-        # For locate or pick actions, we need object localization
-        elif action in ['locate_object', 'pick', 'place', 'move']:
+        # For pick actions, we need object localization
+        elif action in ['pick', 'place']:
             target_object = parameters.get('object', '')
             if target_object:
                 vlm_request['type'] = 'locate'
