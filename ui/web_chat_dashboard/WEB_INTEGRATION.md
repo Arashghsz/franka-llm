@@ -66,7 +66,7 @@ cd /home/arash/franka-llm
 colcon build --packages-select franka_coordinator
 
 # Source the installation
-source install/setup.bash
+source install/setup.zsh
 ```
 
 ### Step 2: Start ROSBridge WebSocket Server
@@ -82,7 +82,7 @@ ros2 launch rosbridge_server rosbridge_websocket_launch.xml
 ```bash
 # Terminal 2
 cd /home/arash/franka-llm
-source install/setup.bash
+source install/setup.zsh
 ros2 launch realsense_cameras cameras.launch.py
 ```
 
@@ -91,7 +91,7 @@ ros2 launch realsense_cameras cameras.launch.py
 ```bash
 # Terminal 3
 cd /home/arash/franka-llm
-source install/setup.bash
+source install/setup.zsh
 ros2 run franka_llm_planner llm_coordinator
 ```
 
@@ -100,7 +100,7 @@ ros2 run franka_llm_planner llm_coordinator
 ```bash
 # Terminal 4
 cd /home/arash/franka-llm
-source install/setup.bash
+source install/setup.zsh
 ros2 run franka_vlm_agent vlm_node
 ```
 
@@ -109,7 +109,7 @@ ros2 run franka_vlm_agent vlm_node
 ```bash
 # Terminal 5
 cd /home/arash/franka-llm
-source install/setup.bash
+source install/setup.zsh
 ros2 run franka_coordinator web_handler
 ```
 
