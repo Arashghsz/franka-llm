@@ -3,7 +3,7 @@
 
 # LLM Coordinator Settings
 llm:
-  model: "llama3.1:8b"              # Available models: llama3.1:8b
+  model: "llama3.1:8b"              # Available models: llama3.1:8b, gemma3:27b
   ollama_url: "http://localhost:11434"
   temperature: 0.3
   timeout: 60

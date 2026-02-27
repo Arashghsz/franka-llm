@@ -83,7 +83,7 @@ ros2 launch rosbridge_server rosbridge_websocket_launch.xml
 # Terminal 2
 cd /home/arash/franka-llm
 source install/setup.zsh
-ros2 launch realsense_cameras cameras.launch.py
+ros2 launch realsense_cameras ee_camera.launch.py
 ```
 
 ### Step 4: Start LLM Coordinator

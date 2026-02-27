@@ -122,52 +122,83 @@ Decision rules:
 - "where is the [object]" → intent: "inspect", target: VLM, action: "locate_object" (just find, no manipulation)
 - "pick [object]", "grasp [object]" → intent: "manipulate", target: BOTH, action: "pick" (VLM finds object, MOTION executes)
 - "place it [location]", "put it [location]", "place the object [location]" → intent: "manipulate", target: BOTH, action: "place"
-  - CRITICAL: Extract the COMPLETE location description from the command including ALL details
-  - Location examples: 
-    * "on the left" → location: "on the left"
-    * "next to the red cube" → location: "next to the red cube"
-    * "left side of the yellow dice" → location: "left side of the yellow dice"
-    * "at the left side of the yellow dice with 4 dots" → location: "left side of the yellow dice with 4 dots"
-  - Include ALL descriptive details (colors, features, positions relative to other objects)
-  - NEVER truncate or shorten the location description
-  - NEVER include "it" or "the object I have" or "what I'm holding" in parameters
-  - For "place it next to the red cube" → parameters: {"location": "next to the red cube"} (NO object field)
-  - For "place it at the left side of the yellow dice with 4 dots" → parameters: {"location": "left side of the yellow dice with 4 dots"} (NO object field)
+  - Robot must already be holding an object
+  - Do NOT include "object" parameter, only "location"
+- "give it to me", "hand it over", "bring it here", "handover" → intent: "manipulate", target: BOTH, action: "handover"
+  - Robot must already be holding an object (picked previously)
+  - Do NOT include "object" parameter
+  - VLM will detect hand position for delivery
+  - CRITICAL: Determine placement type and extract parameters:
+  
+  PLACEMENT TYPES:
+  1. **OFFSET PLACEMENT** (placement_type: "offset")
+     - Keywords: "to the left of", "to the right of", "above", "below", "next to", "at the left of", "at the right of", "at the top of", "at the bottom of"
+     - Extract direction: "left", "right", "top", "bottom"
+     - Robot will place 8cm away from target object center in specified direction
+     - Examples:
+       * "place it to the left of the red cube" → {"location": "red cube", "placement_type": "offset", "direction": "left"}
+       * "place it at the right of the yellow dice" → {"location": "yellow dice", "placement_type": "offset", "direction": "right"}
+       * "place it above the screwdriver" → {"location": "screwdriver", "placement_type": "offset", "direction": "top"}
+       * "place it at the bottom of the blue block" → {"location": "blue block", "placement_type": "offset", "direction": "bottom"}
+  
+  2. **STACKING** (placement_type: "stack")
+     - Keywords: "on top of", "stack on", "stack it on", "on [object]" where object is 3D (dice, cube, block)
+     - Robot will place object directly on top of target object
+     - Use for 3D objects like dice, cubes, blocks (NOT flat surfaces)
+     - Examples:
+       * "place it on top of the red cube" → {"location": "red cube", "placement_type": "stack"}
+       * "place it on the yellow dice" → {"location": "yellow dice", "placement_type": "stack"}
+       * "stack it on the blue block" → {"location": "blue block", "placement_type": "stack"}
+       * "stack it on the red dice" → {"location": "red dice", "placement_type": "stack"}
+       * "on the red dice" → {"location": "red dice", "placement_type": "stack"}
+  
+  3. **DIRECT PLACEMENT** (placement_type: "direct")
+     - Keywords: "there", "here", "at that spot", "on [flat surface]" (sticky note, paper, table)
+     - Robot will place at exact detected location (good for flat objects)
+     - Use for flat surfaces or when stacking is not intended
+     - Examples:
+       * "place it there" → {"location": "there", "placement_type": "direct"}
+       * "put it on the sticky note" → {"location": "sticky note", "placement_type": "direct"}
+  
+  - Include ALL descriptive details (colors, features, object characteristics)
+  - NEVER include "it" or "the object I have" in parameters
+  - For ambiguous cases, default to "direct" placement
 - "move [object] to [location]" → intent: "manipulate", target: BOTH, action: "move"
 
 Respond in JSON format:
 {
   "intent": "greeting" | "inspect" | "manipulate" | "query",
   "target_agent": "none" | "vlm" | "motion" | "both",
-  "action": "greet" | "describe_scene" | "locate_object" | "pick" | "place" | "move",
+  "action": "greet" | "describe_scene" | "locate_object" | "pick" | "place" | "handover" | "move",
   "response": "your direct response for greetings/queries (if target_agent is none)",
   "parameters": {
-    "object": "target object name (ONLY for pick/move actions, NEVER for place)",
-    "location": "target location description (ONLY for place/move actions)"
+    "object": "target object name (ONLY for pick/move actions, NEVER for place/handover)",
+    "location": "target location/object description (ONLY for place/move actions)",
+    "placement_type": "offset" | "stack" | "direct" (ONLY for place actions),
+    "direction": "left" | "right" | "top" | "bottom" (ONLY when placement_type is "offset")
   },
   "reasoning": "brief explanation"
 }
 
 IMPORTANT FOR PLACE ACTIONS:
-- If user says "place it [somewhere]" or "put it [somewhere]", extract the COMPLETE location description
-- Include ALL details: colors, features, relative positions, object characteristics
-- Do NOT truncate or shorten the location - capture everything after "place it" or "put it"
-- Do NOT add an "object" field for place actions
-- The robot already has the object in its gripper
-- Examples: 
-  * "place it next to the red cube" → {"location": "next to the red cube"}
-  * "place it at the left side of the table" → {"location": "left side of the table"}
-  * "place it at the left side of the yellow dice with 4 dots at the top of it" → {"location": "left side of the yellow dice with 4 dots at the top of it"}
+- Identify the placement type based on user's language
+- Extract target location/object and direction if applicable
+- Include ALL details: colors, features, object characteristics
+- Do NOT add an "object" field for place actions (robot already holding it)
 
 Examples:
 - "hello" → {"intent": "greeting", "target_agent": "none", "action": "greet", "response": "Hello! I'm Franka Assistant, your robot coordinator. I can help you inspect the workspace or manipulate objects. What would you like to do?", ...}
 - "what do you see?" → {"intent": "inspect", "target_agent": "vlm", "action": "describe_scene", ...}
 - "where is the red cup?" → {"intent": "inspect", "target_agent": "vlm", "action": "locate_object", "parameters": {"object": "red cup"}, ...}
 - "pick up the apple" → {"intent": "manipulate", "target_agent": "both", "action": "pick", "parameters": {"object": "apple"}, ...}
-- "place it on the left side" → {"intent": "manipulate", "target_agent": "both", "action": "place", "parameters": {"location": "on the left side"}, ...}
-- "place it next to the red cube" → {"intent": "manipulate", "target_agent": "both", "action": "place", "parameters": {"location": "next to the red cube"}, ...}
-- "place it at the left side of the yellow dice with 4 dots at the top of it" → {"intent": "manipulate", "target_agent": "both", "action": "place", "parameters": {"location": "left side of the yellow dice with 4 dots at the top of it"}, ...}
-- "put it in the center" → {"intent": "manipulate", "target_agent": "both", "action": "place", "parameters": {"location": "in the center"}, ...}
+- "give it to me" → {"intent": "manipulate", "target_agent": "both", "action": "handover", "parameters": {}, ...}
+- "place it to the left of the red cube" → {"intent": "manipulate", "target_agent": "both", "action": "place", "parameters": {"location": "red cube", "placement_type": "offset", "direction": "left"}, ...}
+- "place it to the right of the yellow dice" → {"intent": "manipulate", "target_agent": "both", "action": "place", "parameters": {"location": "yellow dice", "placement_type": "offset", "direction": "right"}, ...}
+- "place it above the screwdriver" → {"intent": "manipulate", "target_agent": "both", "action": "place", "parameters": {"location": "screwdriver", "placement_type": "offset", "direction": "top"}, ...}
+- "place it on top of the red cube" → {"intent": "manipulate", "target_agent": "both", "action": "place", "parameters": {"location": "red cube", "placement_type": "stack"}, ...}
+- "stack it on the blue block" → {"intent": "manipulate", "target_agent": "both", "action": "place", "parameters": {"location": "blue block", "placement_type": "stack"}, ...}
+- "place it there" → {"intent": "manipulate", "target_agent": "both", "action": "place", "parameters": {"location": "there", "placement_type": "direct"}, ...}
+- "put it on the sticky note" → {"intent": "manipulate", "target_agent": "both", "action": "place", "parameters": {"location": "sticky note", "placement_type": "direct"}, ...}
 """
         
         self.get_logger().info(f'LLM Coordinator started. Model: {self.model}')
@@ -319,8 +350,19 @@ Examples:
         if action == 'place' and parameters.get('location') and not parameters.get('object'):
             vlm_request['type'] = 'ground_location'
             vlm_request['location'] = parameters['location']
-            self.get_logger().info(f"Requesting VLM to ground location: {parameters['location']}")
+            # Include placement type and direction for coordinator
+            vlm_request['placement_type'] = parameters.get('placement_type', 'direct')
+            if parameters.get('direction'):
+                vlm_request['direction'] = parameters['direction']
+            self.get_logger().info(f"Requesting VLM to ground location: {parameters['location']} (type: {vlm_request['placement_type']})")
             self._publish_log('Vision Agent', f"Grounding location: {parameters['location']}")
+        # Handle handover - detect hand position
+        elif action == 'handover' and not parameters.get('object'):
+            vlm_request['type'] = 'locate'
+            vlm_request['object'] = 'hand'
+            vlm_request['action'] = 'handover'  # Pass action to VLM
+            self.get_logger().info('Requesting VLM to locate hand for handover')
+            self._publish_log('Vision Agent', 'Detecting hand position for delivery...')
         # For locate or pick actions, we need object localization
         elif action in ['locate_object', 'pick', 'place', 'move']:
             target_object = parameters.get('object', '')

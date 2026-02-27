@@ -225,6 +225,7 @@ class VLMNode(Node):
             if request_type == 'locate' and target_object:
                 self._handle_locate_request(target_object)
             elif request_type == 'ground_location' and target_object:
+                # target_object is actually the full request dict for ground_location
                 self._handle_ground_location_request(target_object)
             else:
                 self._handle_describe_request()
@@ -235,7 +236,7 @@ class VLMNode(Node):
             self.get_logger().error(traceback.format_exc())
     
     def _parse_request(self, request_str: str) -> tuple:
-        """Parse request string into (type, object_name or location)"""
+        """Parse request string into (type, object_name or location or full request)"""
         try:
             # Try JSON format
             req = json.loads(request_str)
@@ -245,9 +246,11 @@ class VLMNode(Node):
             if req_type in ['scene_description', 'describe', 'analyze', 'scene']:
                 return 'describe', None
             elif req_type == 'locate':
-                return 'locate', req.get('object', None)
+                # Return full request dict to get action parameter
+                return 'locate', req
             elif req_type == 'ground_location':
-                return 'ground_location', req.get('location', None)
+                # Return tuple with location and full request dict for placement params
+                return 'ground_location', req
             else:
                 return 'describe', None
                 
@@ -259,9 +262,20 @@ class VLMNode(Node):
             else:
                 return 'describe', None
     
-    def _handle_ground_location_request(self, location_description: str):
+    def _handle_ground_location_request(self, request_data):
         """Handle location grounding request"""
-        self.get_logger().info(f'Grounding location: "{location_description}"...')
+        # Extract location and placement parameters
+        if isinstance(request_data, dict):
+            location_description = request_data.get('location', '')
+            placement_type = request_data.get('placement_type', 'direct')
+            direction = request_data.get('direction', None)
+        else:
+            # Fallback for string format
+            location_description = str(request_data)
+            placement_type = 'direct'
+            direction = None
+        
+        self.get_logger().info(f'Grounding location: "{location_description}" (type: {placement_type}, direction: {direction})...')
         
         # Encode image
         image_base64 = encode_image_to_base64(self.latest_image)
@@ -318,17 +332,38 @@ class VLMNode(Node):
                 
                 if position_3d:
                     self._publish_position(position_3d)
-                    # Publish grounding with bbox for coordinator
-                    self._publish_grounding(location_description, center, 'place')
+                    # Publish grounding with placement parameters for coordinator
+                    self._publish_grounding(
+                        location_description, 
+                        center, 
+                        'place',
+                        placement_type=placement_type,
+                        direction=direction
+                    )
             else:
                 self.get_logger().warn(f'✗ Could not ground location "{location_description}"')
                 self._publish_explanation(f'Location "{location_description}" not found')
         else:
-            self.get_logger().error(f'✗ Failed to get response from VLM')
+            # Check if this was a "not found" response vs actual VLM failure
+            if result and result.get('not_found'):
+                self.get_logger().warn(f'✗ VLM could not find location "{location_description}"')
+                self._publish_explanation(f'I cannot find "{location_description}" in the camera view.')
+            else:
+                self.get_logger().error(f'✗ Failed to get response from VLM')
+                self._publish_explanation('Vision system is not responding. Please try again.')
     
-    def _handle_locate_request(self, target_object: str):
+    def _handle_locate_request(self, request_data):
         """Handle object localization request"""
-        self.get_logger().info(f'Locating "{target_object}"...')
+        # Extract object name and action from request
+        if isinstance(request_data, dict):
+            target_object = request_data.get('object', '')
+            action = request_data.get('action', 'pick')  # Default to pick if not specified
+        else:
+            # Fallback for string format
+            target_object = str(request_data)
+            action = 'pick'
+        
+        self.get_logger().info(f'Locating "{target_object}" for action: {action}...')
         
         # Encode image
         image_base64 = encode_image_to_base64(self.latest_image)
@@ -385,12 +420,28 @@ class VLMNode(Node):
                 if position_3d:
                     self._publish_position(position_3d)
                     # NEW: Publish grounding with bbox for coordinator
-                    self._publish_grounding(target_object, center, 'pick')
+                    self._publish_grounding(target_object, center, action)
             else:
                 self.get_logger().warn(f'✗ Could not locate "{target_object}"')
-                self._publish_explanation(f'Object "{target_object}" not found')
+                # Special message for hand detection failure during handover
+                if target_object.lower() == 'hand' and action == 'handover':
+                    error_msg = "I don't see your hand. Please show your hand clearly in front of the camera."
+                    self._publish_explanation(error_msg)
+                else:
+                    self._publish_explanation(f'Object "{target_object}" not found')
         else:
-            self.get_logger().error(f'✗ Failed to get response from VLM')
+            # Check if this was a "not found" response vs actual VLM failure
+            if result and result.get('not_found'):
+                self.get_logger().warn(f'✗ VLM could not find "{target_object}"')
+                # Special message for hand detection failure during handover
+                if target_object.lower() == 'hand' and action == 'handover':
+                    error_msg = "I don't see your hand. Please show your hand clearly in front of the camera."
+                    self._publish_explanation(error_msg)
+                else:
+                    self._publish_explanation(f'I cannot find "{target_object}" in the camera view.')
+            else:
+                self.get_logger().error(f'✗ Failed to get response from VLM')
+                self._publish_explanation('Vision system is not responding. Please try again.')
     
     def _handle_describe_request(self):
         """Handle scene description request"""
@@ -440,7 +491,8 @@ class VLMNode(Node):
         
         self.position_pub.publish(pose_msg)
     
-    def _publish_grounding(self, target_name: str, center: list, action: str):
+    def _publish_grounding(self, target_name: str, center: list, action: str, 
+                          placement_type: str = 'direct', direction: str = None):
         """Publish grounding info with bbox around center pixel for coordinator"""
         # Create a small bbox around the center (±20 pixels)
         bbox_size = 40
@@ -453,15 +505,25 @@ class VLMNode(Node):
             "target": target_name,
             "bbox": [x1, y1, x2, y2],
             "center": center,
-            "action": action
+            "action": action,
+            "placement_type": placement_type
         }
+        
+        # Add direction if specified
+        if direction:
+            grounding_data["direction"] = direction
         
         msg = String()
         msg.data = json.dumps(grounding_data)
         self.grounding_pub.publish(msg)
         
+        placement_info = f" (type: {placement_type}"
+        if direction:
+            placement_info += f", direction: {direction}"
+        placement_info += ")"
+        
         self.get_logger().info(
-            f'📤 Published grounding: {target_name} bbox=[{x1},{y1},{x2},{y2}] → /vlm_grounding'
+            f'📤 Published grounding: {target_name} bbox=[{x1},{y1},{x2},{y2}]{placement_info} → /vlm_grounding'
         )
     
     def _publish_system_info(self):

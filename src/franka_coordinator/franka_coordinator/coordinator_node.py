@@ -59,8 +59,8 @@ class FrankaCoordinator(Node):
             node=self,
             # Calibration files are in src/realsense_cameras/new_calibration/
             calibration_dir=None,  # Uses default path
-            robot_offset_x=0.48,  # X offset from ArUco marker to robot base
-            robot_offset_z=0.02   # Z offset from ArUco marker to robot base
+            robot_offset_x=0.49,  # X offset from ArUco marker to robot base
+            robot_offset_z=0.15   # Z offset from ArUco marker to robot base
         )
         
         # Publisher for outgoing commands
@@ -348,13 +348,66 @@ class FrankaCoordinator(Node):
                 self.get_logger().error(f'❌ Failed to compute 3D position for "{target}"')
                 return
             
-            # Apply offset for place actions (10cm to the side to avoid placing on top of reference)
+            # Apply offset based on placement type for place actions
             if action == 'place':
                 import numpy as np
-                # Add 10cm offset in the Y direction (to the side)
-                position_robot = position_robot + np.array([0.0, 0.1, 0.0])
+                
+                # Get placement parameters from grounding message
+                placement_type = grounding.get('placement_type', 'direct')
+                direction = grounding.get('direction', None)
+                
+                if placement_type == 'offset' and direction:
+                    # Apply 8cm offset in specified direction
+                    offset_distance = 0.08  # 8cm
+                    
+                    if direction == 'left':
+                        # Left in robot frame is +Y
+                        offset = np.array([0.0, offset_distance, 0.0])
+                    elif direction == 'right':
+                        # Right in robot frame is -Y
+                        offset = np.array([0.0, -offset_distance, 0.0])
+                    elif direction == 'top':
+                        # Top/above in camera view is +X in robot frame (away from robot)
+                        offset = np.array([offset_distance, 0.0, 0.0])
+                    elif direction == 'bottom':
+                        # Bottom/below in camera view is -X in robot frame (toward robot/camera)
+                        offset = np.array([-offset_distance, 0.0, 0.0])
+                    else:
+                        offset = np.array([0.0, 0.0, 0.0])
+                    
+                    position_robot = position_robot + offset
+                    self.get_logger().info(
+                        f'   ⚡ OFFSET PLACEMENT: Applied 8cm offset in "{direction}" direction\n'
+                        f'   Final position: X={position_robot[0]:+.4f}m, Y={position_robot[1]:+.4f}m, Z={position_robot[2]:+.4f}m'
+                    )
+                    
+                elif placement_type == 'stack':
+                    # Stacking: use detected Z (table+object height) and add object-being-placed height
+                    # Assuming held object is ~3cm tall (dice/small object)
+                    # Z already includes the target object's height from depth camera
+                    held_object_height = 0.03  # 3cm for dice or small objects
+                    clearance = 0.015  # 1.5cm clearance
+                    offset = np.array([0.0, 0.0, held_object_height + clearance])
+                    position_robot = position_robot + offset
+                    self.get_logger().info(
+                        f'   📚 STACKING: Target height Z={position_robot[2]-offset[2]:.3f}m + object height {held_object_height*1000:.0f}mm + clearance {clearance*1000:.0f}mm\n'
+                        f'   Final position: X={position_robot[0]:+.4f}m, Y={position_robot[1]:+.4f}m, Z={position_robot[2]:+.4f}m'
+                    )
+                    
+                else:  # placement_type == 'direct' or no type specified
+                    # Direct placement: use exact detected position
+                    self.get_logger().info(
+                        f'   🎯 DIRECT PLACEMENT: Using exact detected position\n'
+                        f'   Final position: X={position_robot[0]:+.4f}m, Y={position_robot[1]:+.4f}m, Z={position_robot[2]:+.4f}m'
+                    )
+            
+            # HANDOVER: Override Z to fixed handover height (30cm)
+            elif action == 'handover':
+                import numpy as np
+                handover_height = 0.30  # Fixed 30cm height for handover
+                position_robot[2] = handover_height
                 self.get_logger().info(
-                    f'   Applied 10cm offset for place action:\n'
+                    f'   🤝 HANDOVER: Using detected hand XY with fixed Z={handover_height}m\n'
                     f'   Final position: X={position_robot[0]:+.4f}m, Y={position_robot[1]:+.4f}m, Z={position_robot[2]:+.4f}m'
                 )
             

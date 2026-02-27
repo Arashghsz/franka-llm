@@ -140,6 +140,15 @@ class OllamaVLMClient:
                     'description': response_text,
                     'confidence': 'low'
                 }
+            
+            # Check if VLM explicitly said NOT FOUND
+            if 'not found' in response_text.lower():
+                return {
+                    'center': None,
+                    'description': response_text,
+                    'confidence': 'none',
+                    'not_found': True
+                }
         
         return None
     

@@ -26,16 +26,16 @@ class ArucoCoordinateTransformer:
     def __init__(self, 
                  node: Node,
                  calibration_dir: str = None,
-                 robot_offset_x: float = 0.530,
-                 robot_offset_z: float = 0.02):
+                 robot_offset_x: float = 0.49,
+                 robot_offset_z: float = 0.15):
         """
         Initialize ArUco-based coordinate transformer.
         
         Args:
             node: ROS 2 node for logging
             calibration_dir: Directory containing rotation_vector.pkl and translational_vector.pkl
-            robot_offset_x: X offset for robot calibration (default: 0.530m)
-            robot_offset_z: Z offset for robot calibration (default: 0.02m)
+            robot_offset_x: X offset for robot calibration (default: 0.49m)
+            robot_offset_z: Z offset for robot calibration (default: 0.15m)
         """
         self.node = node
         self.robot_offset_x = robot_offset_x

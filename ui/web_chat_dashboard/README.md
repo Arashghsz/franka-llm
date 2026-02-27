@@ -68,7 +68,7 @@ The dashboard communicates with a dynamic ROS2 backend:
 cd /home/arash/franka-llm
 
 # Build the coordinator and web handler
-colcon build --packages-select franka_coordinator
+colcon build
 
 # Source the installation
 source install/setup.bash

@@ -72,6 +72,8 @@ class MotionExecutorNode(Node):
                 self.handle_pick_request(parameters)
             elif action == 'place':
                 self.handle_place_request(parameters)
+            elif action == 'handover':
+                self.handle_handover_request(parameters)
             else:
                 self.get_logger().warn(f'Unknown action: {action}')
                 self.publish_status('failed', f'Unknown action: {action}')
@@ -157,6 +159,22 @@ class MotionExecutorNode(Node):
         else:
             self.get_logger().info('Waiting for target position')
     
+    def handle_handover_request(self, parameters: dict):
+        object_name = parameters.get('object', 'object')
+        
+        self.get_logger().info(f'Handover request: {object_name}')
+        self.target_object = object_name
+        self.current_action = 'handover'
+        
+        # First pick the object if we don't have it yet
+        if self.latest_target_position:
+            self.get_logger().info('Target position available, executing handover sequence')
+            # If we have a position, this is the hand position for delivery
+            # We assume object is already picked (two-step process)
+            self.execute_handover()
+        else:
+            self.get_logger().info('Waiting for hand position from VLM')
+    
     def execute_place_object(self):
         if not self.latest_target_position:
             self.get_logger().error('No target position available')
@@ -195,8 +213,9 @@ class MotionExecutorNode(Node):
         self.manip.move_to_position(x, y, 0.6, velocity_scaling=0.1)
         time.sleep(1.0)
         
-        self.get_logger().info('Step 2: Moving down to placement height')
-        self.manip.move_to_position(x, y, 0.15, velocity_scaling=0.1)
+        self.get_logger().info(f'Step 2: Moving down to placement height (Z={z:.3f}m)')
+        # Use actual Z coordinate from target position (includes object height for stacking)
+        self.manip.move_to_position(x, y, z, velocity_scaling=0.1)
         time.sleep(1.0)
         
         self.get_logger().info('Step 3: Opening gripper to release')
@@ -210,6 +229,73 @@ class MotionExecutorNode(Node):
         self.get_logger().info('Step 5: Moving to home')
         self.manip.move_home()
         time.sleep(1.0)
+    
+    def execute_handover(self):
+        """Execute handover: bring object to detected hand position (Z=0.30m fixed)"""
+        if not self.latest_target_position:
+            self.get_logger().error('No hand position available')
+            self.publish_status('failed', 'No hand position')
+            return
+        
+        target = self.latest_target_position
+        object_name = self.target_object or 'object'
+        
+        self.get_logger().info(f'Executing handover: {object_name}')
+        self.get_logger().info(f'Hand position: X={target.pose.position.x:.4f}m, '
+                              f'Y={target.pose.position.y:.4f}m, '
+                              f'Z={target.pose.position.z:.4f}m (fixed at 0.30m)')
+        
+        try:
+            self.publish_status('executing', f'Delivering {object_name} to hand')
+            
+            # Move to handover position
+            self.get_logger().info('Step 1: Moving to position above hand')
+            self.manip.move_to_position(
+                target.pose.position.x,
+                target.pose.position.y,
+                0.6,
+                velocity_scaling=0.1
+            )
+            time.sleep(1.0)
+            
+            self.get_logger().info(f'Step 2: Moving down to handover height (Z={target.pose.position.z:.3f}m)')
+            self.manip.move_to_position(
+                target.pose.position.x,
+                target.pose.position.y,
+                target.pose.position.z,  # Z=0.30m from coordinator
+                velocity_scaling=0.1
+            )
+            time.sleep(1.0)
+            
+            self.get_logger().info('Step 3: Waiting for user to take object (5 seconds)')
+            time.sleep(2.5)  # Wait for user to grasp
+            
+            self.get_logger().info('Step 4: Opening gripper to release')
+            self.manip.open_gripper(width=0.08)
+            time.sleep(1.0)
+            
+            self.get_logger().info('Step 5: Moving back up')
+            self.manip.move_to_position(
+                target.pose.position.x,
+                target.pose.position.y,
+                0.6,
+                velocity_scaling=0.1
+            )
+            time.sleep(1.0)
+            
+            self.get_logger().info('Step 6: Moving to home')
+            self.manip.move_home()
+            time.sleep(1.0)
+            
+            self.publish_status('completed', f'Successfully handed over {object_name}')
+            self.get_logger().info(f'Handover completed: {object_name}')
+            
+            self.current_action = None
+            self.latest_target_position = None
+            
+        except Exception as e:
+            self.get_logger().error(f'Handover failed: {e}')
+            self.publish_status('failed', str(e))
     
     def publish_status(self, status: str, message: str = ''):
         status_msg = {

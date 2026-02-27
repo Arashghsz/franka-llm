@@ -44,7 +44,7 @@ class ArucoTransformer:
         print(f"   Translation vector: {self.translation_vector.squeeze()}")
         print(f"   ArUco → Camera translation: {self.t_aruco_cam}")
     
-    def pixel_to_robot(self, u, v, z, camera_intrinsics, robot_offset_x=0.50, robot_offset_z=0.02):
+    def pixel_to_robot(self, u, v, z, camera_intrinsics, robot_offset_x=0.49, robot_offset_z=0.15):
         """
         Convert pixel coordinates to robot frame
         
@@ -53,8 +53,8 @@ class ArucoTransformer:
             v: Pixel y coordinate (vertical)
             z: Depth in meters
             camera_intrinsics: pyrealsense2 intrinsics object
-            robot_offset_x: X offset for robot calibration (default: 0.48m)
-            robot_offset_z: Z offset for robot calibration (default: 0.02m)
+            robot_offset_x: X offset for robot calibration (default: 0.49m)
+            robot_offset_z: Z offset for robot calibration (default: 0.15m)
         
         Returns:
             tuple: (robot_x, robot_y, robot_z) in meters
