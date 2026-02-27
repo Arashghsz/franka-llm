@@ -316,7 +316,11 @@ class WebHandler(Node):
             except (json.JSONDecodeError, ValueError):
                 pass  # Not JSON, continue with normal processing
             
+            # Check if this is a hand detection error message - don't attach image
+            is_hand_error = "I don't see your hand" in explanation
+            
             # Only include image if this is a scene description (not JSON object detection)
+            # and NOT a hand detection error
             latest_image = None
             formatted_message = explanation
             
@@ -340,11 +344,15 @@ class WebHandler(Node):
                         formatted_message = f"**Detection Result**\n\n{description}\n\n**Confidence:** {confidence}"
                 
                 # Get most recent image (not object-specific to avoid old files)
-                latest_image = self._get_latest_debug_image(None)
+                # Skip image for hand detection errors
+                if not is_hand_error:
+                    latest_image = self._get_latest_debug_image(None)
                 self._send_log_message(f'Vision Agent ({self.vlm_model_name})', 'Object detection analysis complete')
             except (json.JSONDecodeError, ValueError):
                 # It's a scene description - include the scene image
-                latest_image = self._get_latest_debug_image('scene_description')
+                # Skip image for hand detection errors
+                if not is_hand_error:
+                    latest_image = self._get_latest_debug_image('scene_description')
                 self._send_log_message(f'Vision Agent ({self.vlm_model_name})', 'Scene analysis complete')
             
             web_message = {
